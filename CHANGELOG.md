@@ -19,3 +19,5 @@ new dated version section.
   instructions).
 - Apache License 2.0 (`LICENSE`).
 - This changelog.
+- Repo layout: `launcher/`, `api/`, `shared/`, `watchdog/`, `tests/` Python
+  packages, plus a git-ignored `data/` directory.

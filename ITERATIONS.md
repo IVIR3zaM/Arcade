@@ -18,7 +18,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 Just enough to hold code and run tests. No features yet.
 
-- [ ] `[ ]` Create the repo layout: `launcher/`, `api/`, `shared/`,
+- [x] `[x]` Create the repo layout: `launcher/`, `api/`, `shared/`,
   `watchdog/`, `tests/`, `data/` (git-ignored).
 - [ ] `[ ]` Add `.gitignore` (`.venv/`, `__pycache__/`, `data/`, `*.db`).
 - [ ] `[ ]` Add `requirements.txt` (start empty; add deps only when a phase
