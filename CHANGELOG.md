@@ -21,6 +21,7 @@ new dated version section.
 - This changelog.
 - Repo layout: `launcher/`, `api/`, `shared/`, `watchdog/`, `tests/` Python
   packages, plus a git-ignored `data/` directory.
+- Empty `requirements.txt` placeholder; dependencies added per phase as needed.
 
 ### Changed
 
