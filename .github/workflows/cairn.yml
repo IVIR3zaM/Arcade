@@ -10,4 +10,8 @@ jobs:
         with:
           go-version: stable
       - run: go install github.com/IVIR3zaM/Cairn/cmd/cairn@latest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: pip install ruff black flake8 pytest
       - run: cairn verify
