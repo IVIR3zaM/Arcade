@@ -36,7 +36,7 @@ The fastest path to "a game launches." No GUI, no API, no network. A text list
 in the terminal, pick a number, the emulator starts. This proves the hard part:
 that we can drive RetroArch/DuckStation correctly.
 
-- [ ] `[ ]` `shared/models.py`: a `Game` dataclass (title, console, emulator,
+- [x] `[x]` `shared/models.py`: a `Game` dataclass (title, console, emulator,
   core, rom_path, cover_path). *Test first.*
 - [ ] `[ ]` Emulator invocation layer: pure function `build_command(game) ->
   list[str]` for RetroArch (`retroarch -L <core> <rom>`) and DuckStation.

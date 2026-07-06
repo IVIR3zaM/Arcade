@@ -31,6 +31,8 @@ new dated version section.
   runs format/lint/test the same way locally and in CI.
 - `requirements-dev.txt` pinning the dev tools Cairn shells out to (`pytest`,
   `ruff`).
+- `shared/models.py`: `Game` dataclass (title, console, emulator, core,
+  rom_path, cover_path) with a covering test.
 
 ### Known issues
 
