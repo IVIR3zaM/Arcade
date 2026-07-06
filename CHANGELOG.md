@@ -21,3 +21,7 @@ new dated version section.
 - This changelog.
 - Repo layout: `launcher/`, `api/`, `shared/`, `watchdog/`, `tests/` Python
   packages, plus a git-ignored `data/` directory.
+
+### Changed
+
+- `.gitignore` now excludes `.venv/`, `__pycache__/`, `data/`, and `*.db`.

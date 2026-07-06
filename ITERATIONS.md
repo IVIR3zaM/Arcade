@@ -20,7 +20,7 @@ Just enough to hold code and run tests. No features yet.
 
 - [x] `[x]` Create the repo layout: `launcher/`, `api/`, `shared/`,
   `watchdog/`, `tests/`, `data/` (git-ignored).
-- [ ] `[ ]` Add `.gitignore` (`.venv/`, `__pycache__/`, `data/`, `*.db`).
+- [x] `[x]` Add `.gitignore` (`.venv/`, `__pycache__/`, `data/`, `*.db`).
 - [ ] `[ ]` Add `requirements.txt` (start empty; add deps only when a phase
   needs them).
 - [ ] `[ ]` Set up `pytest` and confirm an empty test suite runs green.

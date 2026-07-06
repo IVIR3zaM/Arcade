@@ -1,2 +1,6 @@
 .vscode/
 .claude/
+.venv/
+__pycache__/
+data/
+*.db
