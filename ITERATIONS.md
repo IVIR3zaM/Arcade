@@ -51,7 +51,9 @@ that we can drive RetroArch/DuckStation correctly.
   list on exit.
   - [x] `format_menu(games)`: pure numbered-menu string with console labels.
   - [x] `parse_selection(text, count)`: map input to a game index (validate).
-  - [ ] Interactive loop + `__main__`: print menu, read stdin, launch, repeat.
+  - [x] `run(...)`: interactive loop (inject I/O + launch) — print menu, read
+    choice, launch, repeat until `q`.
+  - [ ] `__main__`: wire `run` to `SEED_GAMES`, real stdin, and `run_game`.
 - [ ] `[ ]` Verify end-to-end **in UTM** with real RetroArch + a test ROM: pick
   a game, it launches, quit returns to the list.
 - [ ] `[ ]` Verify **on real Pi hardware**: one game per system boots and is

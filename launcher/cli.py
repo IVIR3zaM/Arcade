@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from shared.models import Game
 
 
@@ -18,3 +20,22 @@ def parse_selection(text: str, count: int) -> int | None:
     if 1 <= number <= count:
         return number - 1
     return None
+
+
+def run(
+    games: list[Game],
+    read_line: Callable[[], str],
+    launch: Callable[[Game], None],
+    write: Callable[[str], None] = print,
+) -> None:
+    """Show the menu, launch the chosen game, and repeat until the user quits."""
+    while True:
+        write(format_menu(games))
+        choice = read_line()
+        if choice.strip().lower() == "q":
+            return
+        index = parse_selection(choice, len(games))
+        if index is None:
+            write("Invalid selection.")
+            continue
+        launch(games[index])

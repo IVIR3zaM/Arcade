@@ -1,4 +1,4 @@
-from launcher.cli import format_menu, parse_selection
+from launcher.cli import format_menu, parse_selection, run
 from shared.models import Game
 
 
@@ -36,3 +36,23 @@ def test_parse_selection_rejects_out_of_range():
 def test_parse_selection_rejects_non_numeric():
     assert parse_selection("abc", 2) is None
     assert parse_selection("", 2) is None
+
+
+def test_run_launches_selected_game_then_repeats_until_quit():
+    games = [_game("Super Mario 64", "N64"), _game("Sonic", "Genesis")]
+    inputs = iter(["2", "q"])
+    launched = []
+
+    run(games, read_line=lambda: next(inputs), launch=launched.append)
+
+    assert launched == [games[1]]
+
+
+def test_run_reprompts_on_invalid_selection():
+    games = [_game("Super Mario 64", "N64")]
+    inputs = iter(["5", "1", "q"])
+    launched = []
+
+    run(games, read_line=lambda: next(inputs), launch=launched.append)
+
+    assert launched == [games[0]]

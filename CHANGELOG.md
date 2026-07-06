@@ -46,12 +46,9 @@ new dated version section.
 - `launcher/cli.py`: `parse_selection(text, count)`, a pure function mapping a
   1-based menu choice to a 0-based index and returning `None` for out-of-range
   or non-numeric input.
-
-### Known issues
-
-- `cairn verify`'s format step false-fails against ruff 0.15.20: ruff prints
-  "N files already formatted" to stdout on success (exit 0), which Cairn reads
-  as pending changes. Lint and test pass. Fix belongs in the Cairn repo.
+- `launcher/cli.py`: `run(games, read_line, launch, write)`, the interactive
+  loop that prints the menu, launches the chosen game, and repeats until the
+  user quits with `q`; I/O and launching are injected so it is testable.
 
 ### Changed
 
