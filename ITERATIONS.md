@@ -41,7 +41,7 @@ that we can drive RetroArch/DuckStation correctly.
 - [x] `[x]` Emulator invocation layer: pure function `build_command(game) ->
   list[str]` for RetroArch (`retroarch -L <core> <rom>`) and DuckStation.
   *Test first — assert exact command per console/core; no launching.*
-- [ ] `[ ]` `run_game(command)`: thin subprocess wrapper that runs and waits.
+- [x] `[x]` `run_game(command)`: thin subprocess wrapper that runs and waits.
   Kept separate from `build_command` so the pure part stays testable; the
   subprocess call is stubbed in tests.
 - [ ] `[ ]` A hardcoded/seeded in-memory list of a few `Game`s to start (no DB

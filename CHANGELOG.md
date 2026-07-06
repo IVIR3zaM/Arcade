@@ -36,6 +36,9 @@ new dated version section.
 - `launcher/emulator.py`: pure `build_command(game)` that builds the RetroArch
   (`retroarch -L <core> <rom>`) or DuckStation launch command without running
   it, with tests asserting the exact command per emulator.
+- `launcher/emulator.py`: `run_game(command)`, a thin subprocess wrapper that
+  runs the launch command and waits, kept separate from `build_command` and
+  stubbed in tests.
 
 ### Known issues
 
