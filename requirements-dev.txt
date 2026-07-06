@@ -1,0 +1,4 @@
+# Dev-only tools. Cairn (the quality-gate orchestrator) shells out to these;
+# install with: pip install -r requirements-dev.txt
+pytest
+ruff

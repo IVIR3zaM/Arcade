@@ -24,7 +24,7 @@ Just enough to hold code and run tests. No features yet.
 - [x] `[x]` Add `requirements.txt` (start empty; add deps only when a phase
   needs them).
 - [x] `[x]` Set up `pytest` and confirm an empty test suite runs green.
-- [ ] `[ ]` Add a `Makefile` or a couple of scripts: `test`, `run-cli`.
+- [x] `[x]` Add a `Makefile` or a couple of scripts: `test`, `run-cli`.
 
 **Done when:** `pytest` runs (with zero or one trivial test) on the Mac.
 

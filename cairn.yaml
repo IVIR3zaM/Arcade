@@ -1,0 +1,50 @@
+# cairn.yaml schema version — do not edit.
+schema: "2"
+# Repo baseline version. `cairn bump` advances it; a sub-package can pin its own under `directories:`.
+version: 0.1.0
+# Languages Cairn runs here (all detected ones are enabled). Per language you may set:
+#   enabled: <bool>, standard: <name>, strict: <bool> (promote that language's warnings to failures).
+languages:
+    python:
+        enabled: true
+# Verify stages and the repo-wide strict default (strict: promote warnings to failures).
+verify:
+    format:
+        enabled: true
+        required: true
+        mode: check
+    lint:
+        enabled: true
+        required: true
+    typecheck:
+        enabled: true
+        required: false
+    test:
+        enabled: true
+        required: true
+    build:
+        enabled: false
+        required: false
+    strict: true
+    timeout: 5m
+# Commit-message policy the commit-msg hook enforces.
+#   convention: conventional · signoff: require a DCO Signed-off-by trailer.
+commits:
+    convention: conventional
+    signoff: false
+    validate_hook: true
+# Changelog format `cairn bump` promotes. standard: dart | keepachangelog.
+#   file defaults to CHANGELOG.md (set it only to override).
+changelog:
+    standard: keepachangelog
+# Git hooks Cairn installs; each stage runs the listed `cairn` subcommands.
+hooks:
+    pre_commit:
+        - verify
+    commit_msg:
+        - commit-lint
+# CI workflow Cairn generates. provider: github · jobs run the listed `cairn` subcommands.
+ci:
+    provider: github
+    jobs:
+        - verify
