@@ -137,6 +137,8 @@ Keep to what's already chosen (see [ARCHITECTURE.md](ARCHITECTURE.md)):
 
 ## Before you finish a change
 
+- `cairn verify` was run after the change and passes (format, lint, tests) —
+  nothing is broken, no new lint issues. Run it before you call the change done.
 - There's a failing-first test that now passes.
 - No production code exists that a test doesn't require.
 - Nothing speculative was added (no unused options, params, abstractions).
