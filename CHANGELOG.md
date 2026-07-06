@@ -33,6 +33,9 @@ new dated version section.
   `ruff`).
 - `shared/models.py`: `Game` dataclass (title, console, emulator, core,
   rom_path, cover_path) with a covering test.
+- `launcher/emulator.py`: pure `build_command(game)` that builds the RetroArch
+  (`retroarch -L <core> <rom>`) or DuckStation launch command without running
+  it, with tests asserting the exact command per emulator.
 
 ### Known issues
 

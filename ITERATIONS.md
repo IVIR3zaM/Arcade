@@ -38,7 +38,7 @@ that we can drive RetroArch/DuckStation correctly.
 
 - [x] `[x]` `shared/models.py`: a `Game` dataclass (title, console, emulator,
   core, rom_path, cover_path). *Test first.*
-- [ ] `[ ]` Emulator invocation layer: pure function `build_command(game) ->
+- [x] `[x]` Emulator invocation layer: pure function `build_command(game) ->
   list[str]` for RetroArch (`retroarch -L <core> <rom>`) and DuckStation.
   *Test first — assert exact command per console/core; no launching.*
 - [ ] `[ ]` `run_game(command)`: thin subprocess wrapper that runs and waits.
