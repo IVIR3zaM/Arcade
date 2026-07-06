@@ -22,6 +22,8 @@ new dated version section.
 - Repo layout: `launcher/`, `api/`, `shared/`, `watchdog/`, `tests/` Python
   packages, plus a git-ignored `data/` directory.
 - Empty `requirements.txt` placeholder; dependencies added per phase as needed.
+- `pytest` configured via `pyproject.toml` (`testpaths = ["tests"]`) with a
+  passing smoke test (`tests/test_smoke.py`).
 
 ### Changed
 
