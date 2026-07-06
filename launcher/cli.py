@@ -1,5 +1,7 @@
 from collections.abc import Callable
 
+from launcher.emulator import build_command, run_game
+from launcher.library import SEED_GAMES
 from shared.models import Game
 
 
@@ -39,3 +41,16 @@ def run(
             write("Invalid selection.")
             continue
         launch(games[index])
+
+
+def launch_game(game: Game) -> None:
+    """Build the launch command for a game and run it."""
+    run_game(build_command(game))
+
+
+def main() -> None:
+    run(SEED_GAMES, read_line=input, launch=launch_game)
+
+
+if __name__ == "__main__":
+    main()

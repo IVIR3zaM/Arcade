@@ -49,6 +49,9 @@ new dated version section.
 - `launcher/cli.py`: `run(games, read_line, launch, write)`, the interactive
   loop that prints the menu, launches the chosen game, and repeats until the
   user quits with `q`; I/O and launching are injected so it is testable.
+- `launcher/cli.py`: `launch_game(game)`, `main()`, and a `__main__` block —
+  `python -m launcher.cli` now shows the seeded games, reads a choice from
+  stdin, and launches it via `build_command` + `run_game`.
 
 ### Changed
 

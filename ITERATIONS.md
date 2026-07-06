@@ -46,14 +46,14 @@ that we can drive RetroArch/DuckStation correctly.
   subprocess call is stubbed in tests.
 - [x] `[x]` A hardcoded/seeded in-memory list of a few `Game`s to start (no DB
   yet — YAGNI).
-- [~] `[~]` CLI entrypoint (`python -m launcher.cli`): print numbered list of
+- [x] `[x]` CLI entrypoint (`python -m launcher.cli`): print numbered list of
   games with console labels, read a number from stdin, launch it, return to the
   list on exit.
   - [x] `format_menu(games)`: pure numbered-menu string with console labels.
   - [x] `parse_selection(text, count)`: map input to a game index (validate).
   - [x] `run(...)`: interactive loop (inject I/O + launch) — print menu, read
     choice, launch, repeat until `q`.
-  - [ ] `__main__`: wire `run` to `SEED_GAMES`, real stdin, and `run_game`.
+  - [x] `__main__`: wire `run` to `SEED_GAMES`, real stdin, and `run_game`.
 - [ ] `[ ]` Verify end-to-end **in UTM** with real RetroArch + a test ROM: pick
   a game, it launches, quit returns to the list.
 - [ ] `[ ]` Verify **on real Pi hardware**: one game per system boots and is

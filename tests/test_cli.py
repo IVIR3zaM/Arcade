@@ -1,4 +1,4 @@
-from launcher.cli import format_menu, parse_selection, run
+from launcher.cli import format_menu, launch_game, parse_selection, run
 from shared.models import Game
 
 
@@ -56,3 +56,13 @@ def test_run_reprompts_on_invalid_selection():
     run(games, read_line=lambda: next(inputs), launch=launched.append)
 
     assert launched == [games[0]]
+
+
+def test_launch_game_builds_and_runs_the_command(monkeypatch):
+    game = _game("Sonic", "Genesis")
+    ran = []
+    monkeypatch.setattr("launcher.cli.run_game", ran.append)
+
+    launch_game(game)
+
+    assert ran == [["retroarch", "-L", "core", "/roms/game.rom"]]
