@@ -41,6 +41,8 @@ new dated version section.
   stubbed in tests.
 - `launcher/library.py`: `SEED_GAMES`, a small hardcoded in-memory list of
   `Game`s (N64/Genesis/PS1) to drive the CLI before a real database exists.
+- `launcher/cli.py`: `format_menu(games)`, a pure function rendering games as a
+  numbered menu with console labels (first slice of the CLI entrypoint).
 
 ### Known issues
 
