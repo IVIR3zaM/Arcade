@@ -44,7 +44,7 @@ that we can drive RetroArch/DuckStation correctly.
 - [x] `[x]` `run_game(command)`: thin subprocess wrapper that runs and waits.
   Kept separate from `build_command` so the pure part stays testable; the
   subprocess call is stubbed in tests.
-- [ ] `[ ]` A hardcoded/seeded in-memory list of a few `Game`s to start (no DB
+- [x] `[x]` A hardcoded/seeded in-memory list of a few `Game`s to start (no DB
   yet — YAGNI).
 - [ ] `[ ]` CLI entrypoint (`python -m launcher.cli`): print numbered list of
   games with console labels, read a number from stdin, launch it, return to the

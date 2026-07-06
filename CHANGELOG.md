@@ -39,6 +39,8 @@ new dated version section.
 - `launcher/emulator.py`: `run_game(command)`, a thin subprocess wrapper that
   runs the launch command and waits, kept separate from `build_command` and
   stubbed in tests.
+- `launcher/library.py`: `SEED_GAMES`, a small hardcoded in-memory list of
+  `Game`s (N64/Genesis/PS1) to drive the CLI before a real database exists.
 
 ### Known issues
 
