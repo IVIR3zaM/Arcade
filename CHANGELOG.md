@@ -43,6 +43,9 @@ new dated version section.
   `Game`s (N64/Genesis/PS1) to drive the CLI before a real database exists.
 - `launcher/cli.py`: `format_menu(games)`, a pure function rendering games as a
   numbered menu with console labels (first slice of the CLI entrypoint).
+- `launcher/cli.py`: `parse_selection(text, count)`, a pure function mapping a
+  1-based menu choice to a 0-based index and returning `None` for out-of-range
+  or non-numeric input.
 
 ### Known issues
 

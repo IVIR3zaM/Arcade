@@ -50,7 +50,7 @@ that we can drive RetroArch/DuckStation correctly.
   games with console labels, read a number from stdin, launch it, return to the
   list on exit.
   - [x] `format_menu(games)`: pure numbered-menu string with console labels.
-  - [ ] `parse_selection(text, count)`: map input to a game index (validate).
+  - [x] `parse_selection(text, count)`: map input to a game index (validate).
   - [ ] Interactive loop + `__main__`: print menu, read stdin, launch, repeat.
 - [ ] `[ ]` Verify end-to-end **in UTM** with real RetroArch + a test ROM: pick
   a game, it launches, quit returns to the list.
