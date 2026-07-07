@@ -38,6 +38,30 @@ RUN set -eux; \
         "https://raw.githubusercontent.com/chesterbr/2048-2600/main/2048.bin"; \
     test -s /roms/atari2600/2048.bin
 
+# PS1 emulator (DuckStation). Not in Debian and its recent license (CC-BY-NC-ND)
+# forbids baking the binary into the repo, so we fetch the official AppImage at
+# build time — same approach as the Stella core. DuckStation ships an arm64 build
+# with a native AArch64 JIT, so it matches the Pi's arch (and the launcher's
+# standalone `duckstation <rom>` command). AppImages need FUSE to mount, which
+# containers lack, so we `--appimage-extract` (works without FUSE) and expose the
+# extracted AppRun as `duckstation` on PATH. `uname -m` maps to the release asset
+# name (aarch64 -> arm64, x86_64 -> x64).
+RUN set -eux; \
+    case "$(uname -m)" in \
+        aarch64) ds_arch=arm64 ;; \
+        x86_64)  ds_arch=x64 ;; \
+        *) echo "unsupported arch for DuckStation: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    curl -fL -o /tmp/duckstation.AppImage \
+        "https://github.com/stenzek/duckstation/releases/download/latest/DuckStation-${ds_arch}.AppImage"; \
+    chmod +x /tmp/duckstation.AppImage; \
+    cd /opt; \
+    /tmp/duckstation.AppImage --appimage-extract; \
+    mv squashfs-root duckstation; \
+    rm /tmp/duckstation.AppImage; \
+    ln -s /opt/duckstation/AppRun /usr/local/bin/duckstation; \
+    test -x /opt/duckstation/AppRun
+
 # Headless display + force software rendering (no GPU in the container).
 ENV DISPLAY=:99 \
     LIBGL_ALWAYS_SOFTWARE=1

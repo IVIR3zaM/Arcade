@@ -91,14 +91,16 @@ that we can drive RetroArch/DuckStation correctly.
       `Dockerfile.play`, keyed off `uname -m` so it works on arm64 and x86_64.
     - [x] Add a free/homebrew Atari 2600 ROM into the image (2048-2600 by
       chesterbr, MIT-licensed, at `/roms/atari2600/2048.bin`).
-  - [ ] Install a **PS1 emulator** matching the launcher's PS1 path
-    (`build_command` runs standalone `duckstation <rom>`). DuckStation isn't in
-    Debian and is primarily x86_64 — confirm an arm64 build works in the
-    container; if it's impractical on arm64, decide with the user whether to fall
-    back to a libretro PS1 core (`libretro-beetle-psx`, which is packaged) and
-    adjust the launcher accordingly. PS1 also needs a BIOS the user provides
-    (copyrighted — mounted, never baked in); homebrew/free PS1 content for a smoke
-    test.
+  - [~] Install a **PS1 emulator** matching the launcher's PS1 path
+    (`build_command` runs standalone `duckstation <rom>`). Decision (user-approved):
+    keep DuckStation — it ships an official arm64 AppImage with a native AArch64
+    JIT, so no launcher change / libretro fallback is needed.
+    - [x] Fetch the official `DuckStation-arm64.AppImage` in `Dockerfile.play`
+      (keyed off `uname -m`), `--appimage-extract` it (no FUSE in containers), and
+      expose the extracted `AppRun` as `duckstation` on `PATH`. Verified in the
+      built image.
+    - [ ] Provide a PS1 BIOS the user supplies (copyrighted — mounted, never baked
+      in) plus homebrew/free PS1 content for a smoke test.
   - [ ] Point the CLI library at the real ROM path(s) and launch a game per
     console (Atari 2600 via RetroArch, PS1 via DuckStation) from
     `python -m launcher.cli`, watched over VNC.

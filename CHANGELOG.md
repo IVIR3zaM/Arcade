@@ -14,6 +14,13 @@ new dated version section.
 
 ### Added
 
+- `Dockerfile.play`: the PS1 emulator DuckStation is now installed. Its official
+  arm64 AppImage is fetched at build time (keyed off `uname -m`; recent
+  DuckStation is CC-BY-NC-ND so the binary is never committed), `--appimage-extract`-ed
+  (no FUSE in containers), and exposed as `duckstation` on `PATH` — matching the
+  launcher's standalone `duckstation <rom>` command with no launcher change. DuckStation's
+  native AArch64 JIT matches the Pi's arch. (PS1 BIOS/ROM smoke test + CLI wiring
+  land in follow-up steps.)
 - `Dockerfile.play`: a free, homebrew Atari 2600 ROM — 2048-2600 by chesterbr,
   MIT-licensed (so it's genuinely redistributable inside the image) — is now
   fetched at build time to `/roms/atari2600/2048.bin`, matching the launcher's
