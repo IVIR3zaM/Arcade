@@ -35,7 +35,7 @@ Just enough to hold code and run tests. No features yet.
   needs them).
 - [x] `[x]` Set up `pytest` and confirm an empty test suite runs green.
 - [x] `[x]` Add a `Makefile` or a couple of scripts: `test`, `run-cli`.
-- [ ] `[ ]` **Docker local environment** (user-approved): a `Dockerfile` on a
+- [x] `[x]` **Docker local environment** (user-approved): a `Dockerfile` on a
   Debian + Python base that installs the app, and a `make` target (or compose
   service) that builds the image and runs the test suite inside it. This is the
   local stand-in for the Pi until the hardware arrives.

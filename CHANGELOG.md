@@ -31,6 +31,10 @@ new dated version section.
   runs format/lint/test the same way locally and in CI.
 - `requirements-dev.txt` pinning the dev tools Cairn shells out to (`pytest`,
   `ruff`).
+- Local Docker environment (Phase 0): a `Dockerfile` on `python:3.12-slim-bookworm`
+  (Debian) that installs deps and copies the app, a `.dockerignore`, and a
+  `make docker-test` target that builds the image and runs the test suite inside
+  it — the Pi stand-in until the hardware arrives.
 - `shared/models.py`: `Game` dataclass (title, console, emulator, core,
   rom_path, cover_path) with a covering test.
 - `launcher/emulator.py`: pure `build_command(game)` that builds the RetroArch
