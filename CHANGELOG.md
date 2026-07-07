@@ -14,6 +14,14 @@ new dated version section.
 
 ### Added
 
+- Real-emulator dev environment: `Dockerfile.play` + `make docker-play` build an
+  image with RetroArch actually installed on a headless X server (Xvfb) exposed
+  over VNC (x11vnc + fluxbox, software GL), so a game can be launched and watched
+  from the Mac host at `localhost:5900`. Dev/test stand-in only — not shipped on
+  the Pi. (Atari 2600 core + free ROM + CLI wiring land in follow-up steps.)
+- End-to-end CLI test (`tests/test_cli_e2e.py`) that spawns `python -m
+  launcher.cli` against a stub emulator on `PATH`, proving the launch → return to
+  menu → `q` exit loop headlessly (verified inside the Docker container).
 - Initial project documentation: `README.md`, `ARCHITECTURE.md`, `AGENTS.md`,
   `ITERATIONS.md` (iterative, CLI-first plan), and `PROMPT.md` (agent operating
   instructions).

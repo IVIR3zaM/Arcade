@@ -69,11 +69,22 @@ that we can drive RetroArch/DuckStation correctly.
   - [x] `run(...)`: interactive loop (inject I/O + launch) — print menu, read
     choice, launch, repeat until `q`.
   - [x] `__main__`: wire `run` to `SEED_GAMES`, real stdin, and `run_game`.
-- [ ] `[ ]` Verify end-to-end **in Docker**: run `python -m launcher.cli` in the
+- [x] `[x]` Verify end-to-end **in Docker**: run `python -m launcher.cli` in the
   container, pick a game, confirm the launch command is invoked and the loop
   returns to the menu (and `q` exits). RetroArch needs a display, so run it
   **headless** — a null/dummy video driver, or a stub `retroarch`/`duckstation`
   on `PATH` that records its args — to prove the loop without a real window.
+- [~] `[~]` **Real-emulator Docker env (VNC)** — beyond the stub e2e, a real
+  RetroArch you can actually watch from the Mac host over VNC and drive with the
+  CLI. Dev/test only; not what ships on the Pi.
+  - [x] `Dockerfile.play` + `make docker-play`: real RetroArch (v1.14) on a
+    headless X server (Xvfb) exposed over VNC (x11vnc) with fluxbox and software
+    GL. Verified the desktop serves on `localhost:5900` and RetroArch initializes
+    GL on the headless display.
+  - [ ] Add a libretro Atari 2600 core (Stella — not packaged in Debian, fetched
+    from the libretro buildbot) plus a free/homebrew ROM into the image.
+  - [ ] Point the CLI library at the real ROM path(s) and launch a game via
+    `python -m launcher.cli`, watched over VNC.
 
 **Done when:** in the Docker container, one command → pick a game from a text
 menu → the emulator command fires (headless) → the loop returns to the menu, for

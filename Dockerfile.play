@@ -1,0 +1,27 @@
+# Real-emulator dev environment: RetroArch actually installed, viewable over VNC
+# from the Mac host, so a game can be launched and watched for real (not stubbed).
+# This is a dev/test stand-in for the Pi — NOT what ships on the device.
+FROM python:3.12-slim-bookworm
+
+# RetroArch + a headless X desktop (Xvfb) exposed over VNC (x11vnc), with a light
+# window manager (fluxbox). Software OpenGL (mesa/llvmpipe) so RetroArch renders
+# without a GPU.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        retroarch \
+        xvfb x11vnc fluxbox x11-utils \
+        libgl1-mesa-dri mesa-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Headless display + force software rendering (no GPU in the container).
+ENV DISPLAY=:99 \
+    LIBGL_ALWAYS_SOFTWARE=1
+
+WORKDIR /app
+COPY . .
+COPY docker/play/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+EXPOSE 5900
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# Default: open RetroArch's menu so a VNC viewer sees it come up.
+CMD ["retroarch"]
