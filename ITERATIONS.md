@@ -84,8 +84,12 @@ that we can drive RetroArch/DuckStation correctly.
     headless X server (Xvfb) exposed over VNC (x11vnc) with fluxbox and software
     GL. Verified the desktop serves on `localhost:5900` and RetroArch initializes
     GL on the headless display.
-  - [ ] Add a libretro Atari 2600 core (Stella — not packaged in Debian, fetched
+  - [~] Add a libretro Atari 2600 core (Stella — not packaged in Debian, fetched
     from the libretro buildbot) plus a free/homebrew ROM into the image.
+    - [x] Fetch the Stella-based `stella2014` core (only Atari 2600 core built for
+      arm64) from the libretro buildbot into `/usr/lib/libretro/` in
+      `Dockerfile.play`, keyed off `uname -m` so it works on arm64 and x86_64.
+    - [ ] Add a free/homebrew Atari 2600 ROM into the image.
   - [ ] Install a **PS1 emulator** matching the launcher's PS1 path
     (`build_command` runs standalone `duckstation <rom>`). DuckStation isn't in
     Debian and is primarily x86_64 — confirm an arm64 build works in the

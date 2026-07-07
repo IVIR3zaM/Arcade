@@ -14,6 +14,11 @@ new dated version section.
 
 ### Added
 
+- `Dockerfile.play`: the Atari 2600 Stella core (`stella2014`, the only 2600 core
+  the libretro buildbot builds for arm64) is now fetched into `/usr/lib/libretro/`
+  at build time, keyed off `uname -m` so it resolves the right buildbot arch dir
+  (`aarch64`/`x86_64`). Adds `curl`/`unzip` to the image for the fetch. (Free ROM +
+  CLI wiring land in follow-up steps.)
 - Real-emulator dev environment: `Dockerfile.play` + `make docker-play` build an
   image with RetroArch actually installed on a headless X server (Xvfb) exposed
   over VNC (x11vnc + fluxbox, software GL), so a game can be launched and watched

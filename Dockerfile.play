@@ -10,7 +10,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         retroarch \
         xvfb x11vnc fluxbox x11-utils \
         libgl1-mesa-dri mesa-utils \
+        curl unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Atari 2600 core (Stella). Not packaged in Debian, so fetch it from the libretro
+# buildbot for the image's architecture. Only the Stella-based `stella2014` core is
+# built for arm64 (the Pi's arch), so we use it. `uname -m` (aarch64 / x86_64) maps
+# directly to the buildbot's directory names. RetroArch is launched with an explicit
+# `-L <core>` path (see build_command), so the core lives at a fixed location.
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    mkdir -p /usr/lib/libretro; \
+    curl -fL -o /tmp/stella.zip \
+        "http://buildbot.libretro.com/nightly/linux/${arch}/latest/stella2014_libretro.so.zip"; \
+    unzip -o /tmp/stella.zip -d /usr/lib/libretro; \
+    rm /tmp/stella.zip; \
+    test -f /usr/lib/libretro/stella2014_libretro.so
 
 # Headless display + force software rendering (no GPU in the container).
 ENV DISPLAY=:99 \
