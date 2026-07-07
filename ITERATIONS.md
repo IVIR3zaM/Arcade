@@ -74,16 +74,28 @@ that we can drive RetroArch/DuckStation correctly.
   returns to the menu (and `q` exits). RetroArch needs a display, so run it
   **headless** — a null/dummy video driver, or a stub `retroarch`/`duckstation`
   on `PATH` that records its args — to prove the loop without a real window.
-- [~] `[~]` **Real-emulator Docker env (VNC)** — beyond the stub e2e, a real
-  RetroArch you can actually watch from the Mac host over VNC and drive with the
-  CLI. Dev/test only; not what ships on the Pi.
+- [~] `[~]` **Real-emulator local dev environment (VNC)** — a full local dev
+  environment, not a PoC: it should mirror the Pi's emulator stack as closely as
+  possible so games run for real and can be watched from the Mac over VNC and
+  driven by the CLI. Known limitations are expected (software GL, no GPU, and
+  copyrighted BIOS/ROMs must be supplied by the user, not baked in). Still a
+  dev/test stand-in — not the image that ships on the Pi.
   - [x] `Dockerfile.play` + `make docker-play`: real RetroArch (v1.14) on a
     headless X server (Xvfb) exposed over VNC (x11vnc) with fluxbox and software
     GL. Verified the desktop serves on `localhost:5900` and RetroArch initializes
     GL on the headless display.
   - [ ] Add a libretro Atari 2600 core (Stella — not packaged in Debian, fetched
     from the libretro buildbot) plus a free/homebrew ROM into the image.
-  - [ ] Point the CLI library at the real ROM path(s) and launch a game via
+  - [ ] Install a **PS1 emulator** matching the launcher's PS1 path
+    (`build_command` runs standalone `duckstation <rom>`). DuckStation isn't in
+    Debian and is primarily x86_64 — confirm an arm64 build works in the
+    container; if it's impractical on arm64, decide with the user whether to fall
+    back to a libretro PS1 core (`libretro-beetle-psx`, which is packaged) and
+    adjust the launcher accordingly. PS1 also needs a BIOS the user provides
+    (copyrighted — mounted, never baked in); homebrew/free PS1 content for a smoke
+    test.
+  - [ ] Point the CLI library at the real ROM path(s) and launch a game per
+    console (Atari 2600 via RetroArch, PS1 via DuckStation) from
     `python -m launcher.cli`, watched over VNC.
 
 **Done when:** in the Docker container, one command → pick a game from a text

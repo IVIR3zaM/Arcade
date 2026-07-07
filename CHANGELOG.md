@@ -19,6 +19,18 @@ new dated version section.
   over VNC (x11vnc + fluxbox, software GL), so a game can be launched and watched
   from the Mac host at `localhost:5900`. Dev/test stand-in only — not shipped on
   the Pi. (Atari 2600 core + free ROM + CLI wiring land in follow-up steps.)
+
+### Changed
+
+- Reframed the real-emulator Docker work in `ITERATIONS.md` as a full local dev
+  environment (not a PoC) that mirrors the Pi's emulator stack, and planned the
+  missing **PS1 emulator** (standalone DuckStation, with an arm64/BIOS caveat and
+  a `libretro-beetle-psx` fallback) alongside the Atari 2600 core.
+- Documented Docker as the **primary local dev environment (not a PoC)** across
+  `README.md`, `AGENTS.md`, and `ARCHITECTURE.md`: added a Docker/VNC section and
+  the `make docker-test`/`make docker-play` targets to the README, an
+  "environment is Docker" note to AGENTS, and demoted UTM to an optional
+  alternative so the next agent treats Docker as the real dev target.
 - End-to-end CLI test (`tests/test_cli_e2e.py`) that spawns `python -m
   launcher.cli` against a stub emulator on `PATH`, proving the launch → return to
   menu → `q` exit loop headlessly (verified inside the Docker container).

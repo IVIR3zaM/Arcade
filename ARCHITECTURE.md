@@ -2,8 +2,9 @@
 
 This describes how the Arcade software fits together, and — importantly — where
 the line sits between code that needs real Pi hardware and code that doesn't, so
-almost everything can be built and tested in UTM or Docker before touching the
-cabinet.
+almost everything can be built and tested in the Docker dev environment (the
+primary local stand-in for the Pi; UTM is an optional alternative) before
+touching the cabinet.
 
 Read [AGENTS.md](AGENTS.md) for how we write the code. This document is about
 _what_ the pieces are and how they talk.

@@ -66,10 +66,20 @@ Patterns are tools, not goals.
   glance beats the impressive one.
 - Name things for what they are. Keep functions small and single-purpose.
 
+## The local dev environment is Docker (not a PoC)
+
+The **Docker image is the real local dev environment**, not a throwaway
+proof-of-concept: a Debian/ARM64 stand-in that mirrors the Pi and installs the
+actual emulators (RetroArch + DuckStation), viewable over VNC. Verify your work
+there (`make docker-test` for the suite, `make docker-play` for the VNC desktop),
+and keep it as close to the real Pi as practical. It's still a dev/test tool —
+**not** the image shipped on the Pi — and the truly hardware-only checks stay in
+Phase 7 (see [ITERATIONS.md](ITERATIONS.md)).
+
 ## Hardware boundary — mockable, but not over-built
 
 Every hardware-dependent piece must sit behind a small function or interface that
-can be swapped for a mock in tests and in the UTM dev environment. Hardware-
+can be swapped for a mock in tests and in the Docker dev environment. Hardware-
 dependent means: reading CPU temp (`vcgencmd`), any GPIO reads, real display
 calls, real controller/USB behavior, actually killing a process or shutting down.
 
@@ -77,7 +87,7 @@ calls, real controller/USB behavior, actually killing a process or shutting down
 
 - A **simple constructor argument (dependency injection)** or a **simple
   conditional** keyed off an env flag (e.g. `ARCADE_ENV`) is enough. Pass in the
-  real implementation on the Pi, a fake in tests/UTM.
+  real implementation on the Pi, a fake in tests/Docker.
 - Keep the hardware-touching surface tiny: a "read temperature" function, a "run
   this command and wait" function, an input source. The _logic_ around them stays
   pure and testable.

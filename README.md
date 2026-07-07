@@ -95,17 +95,34 @@ data/         SQLite DB + ROMs + cover art (git-ignored, lives on the SSD)
 
 ### 1. Develop and test on the MacBook first
 
-Most of the software can be built and tested **without a Pi**. The M1 Mac and
-the Pi are both ARM64, so we run the actual Raspberry Pi OS 64-bit in a VM.
+Most of the software is built and tested **without a Pi**. There are two levels:
 
-- **UTM (QEMU ARM64 VM)** running real Raspberry Pi OS 64-bit is the main dev
-  target. Install the stack there, run the launcher and the API, exercise the
-  full flow.
-- **Plain Python on the Mac / in Docker** is enough for the hardware-independent
-  parts: the API, the SQLite schema, game metadata, and the launcher's UI logic.
-  Hardware-dependent pieces (temperature reads, any GPIO, real display/gamepad
-  behavior) are stubbed with mocks here — see [AGENTS.md](AGENTS.md) and
-  [ARCHITECTURE.md](ARCHITECTURE.md).
+- **Plain Python on the Mac** is enough for the hardware-independent parts: the
+  API, the SQLite schema, game metadata, and the launcher's UI logic. Fast inner
+  loop for TDD.
+- **Docker is the real local dev environment** — not a throwaway proof-of-concept.
+  It's a Debian/ARM64 image that mirrors the Pi's userland (same base, same `apt`
+  packages) and installs the **actual emulators** (RetroArch, and DuckStation for
+  PS1), so games run for real and can be watched from the Mac over VNC. It's the
+  primary stand-in until the physical Pi arrives (see
+  [ITERATIONS.md](ITERATIONS.md), Phase 7 for what only real hardware can prove).
+  Expect known limitations — software GL (no GPU), and copyrighted BIOS/ROMs must
+  be supplied by you, never baked into the image. It's a dev/test tool: **not**
+  the image that ships on the Pi.
+
+Two make targets:
+
+```bash
+make docker-test   # build the Pi-like image and run the test suite inside it
+make docker-play   # build the real-emulator image and serve a VNC desktop
+```
+
+`make docker-play` exposes a desktop on `localhost:5900` — connect any VNC viewer
+(macOS: Finder → Go → Connect to Server → `vnc://localhost:5900`) to watch
+RetroArch/DuckStation run inside the container.
+
+> A UTM (QEMU ARM64) VM running real Raspberry Pi OS is an optional alternative
+> for whole-system checks, but Docker is the default local target.
 
 Typical local loop:
 
