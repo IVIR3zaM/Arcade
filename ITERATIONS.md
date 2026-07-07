@@ -6,9 +6,19 @@ possible (a CLI proof-of-concept), then grow outward. The pretty GUI gallery and
 the network API come **later** — they are not needed to prove a kid can launch a
 game.
 
+We don't harely on the Raspberry Pi yet, so every phase is proven **locally in a
+Docker container** that mirrors the Pi's Linux/arm64 userland (same Debian base,
+same `apt` packages, same `retroarch`). Docker is the local stand-in until the
+last stages — it was chosen by the user for exactly this, and is a dev/test
+tool, **not** part of what ships on the Pi. Anything that genuinely needs the
+physical device — a real display, the arcade stick/gamepad, actual overheat
+shutdown, systemd-on-boot, Tailscale reachability from the MacBook — is
+**deferred to Phase 7**, the real-hardware bring-up, done once the Pi is in hand.
+
 Guiding rule: **each phase ends with something that actually works and is
-tested.** Don't start a later phase until the current one runs. Follow
-[AGENTS.md](AGENTS.md) throughout — TDD, KISS/YAGNI, keep the stack.
+tested** — locally in Docker for now. Don't start a later phase until the current
+one runs. Follow [AGENTS.md](AGENTS.md) throughout — TDD, KISS/YAGNI, keep the
+stack.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
@@ -25,8 +35,13 @@ Just enough to hold code and run tests. No features yet.
   needs them).
 - [x] `[x]` Set up `pytest` and confirm an empty test suite runs green.
 - [x] `[x]` Add a `Makefile` or a couple of scripts: `test`, `run-cli`.
+- [ ] `[ ]` **Docker local environment** (user-approved): a `Dockerfile` on a
+  Debian + Python base that installs the app, and a `make` target (or compose
+  service) that builds the image and runs the test suite inside it. This is the
+  local stand-in for the Pi until the hardware arrives.
 
-**Done when:** `pytest` runs (with zero or one trivial test) on the Mac.
+**Done when:** `pytest` runs green both on the Mac and **inside the Docker
+container**.
 
 ---
 
@@ -54,14 +69,16 @@ that we can drive RetroArch/DuckStation correctly.
   - [x] `run(...)`: interactive loop (inject I/O + launch) — print menu, read
     choice, launch, repeat until `q`.
   - [x] `__main__`: wire `run` to `SEED_GAMES`, real stdin, and `run_game`.
-- [ ] `[ ]` Verify end-to-end **in UTM** with real RetroArch + a test ROM: pick
-  a game, it launches, quit returns to the list.
-- [ ] `[ ]` Verify **on real Pi hardware**: one game per system boots and is
-  playable at acceptable performance (this is the first real-hardware checkpoint;
-  N64/PS1 are the risky ones).
+- [ ] `[ ]` Verify end-to-end **in Docker**: run `python -m launcher.cli` in the
+  container, pick a game, confirm the launch command is invoked and the loop
+  returns to the menu (and `q` exits). RetroArch needs a display, so run it
+  **headless** — a null/dummy video driver, or a stub `retroarch`/`duckstation`
+  on `PATH` that records its args — to prove the loop without a real window.
 
-**Done when:** on the Pi, you can run one command, pick a game from a text menu,
-and play it, for at least one title per console.
+**Done when:** in the Docker container, one command → pick a game from a text
+menu → the emulator command fires (headless) → the loop returns to the menu, for
+at least one title per console. *(Actual on-screen playability on the Pi is a
+Phase 7 checkpoint.)*
 
 ---
 
@@ -77,31 +94,35 @@ Replace the hardcoded game list with a real database, still driven from the CLI.
 - [ ] `[ ]` Point the CLI at `list_games()` instead of the hardcoded list.
 - [ ] `[ ]` A tiny seed/import script to load existing ROMs + metadata into the
   DB (manual for now — the API comes in Phase 4).
-- [ ] `[ ]` Verify the CLI still launches games, now reading from SQLite.
+- [ ] `[ ]` Verify **in Docker** that the CLI still launches games, now reading
+  from SQLite.
 
-**Done when:** the CLI plays games listed from the SQLite database.
+**Done when:** the CLI (in the container) plays games listed from the SQLite
+database.
 
 ---
 
 ## Phase 3 — Temperature watchdog
 
 The hardware-protection service. Doesn't depend on the GUI, so it can land early
-and run independently.
+and run independently. The *logic* is fully testable in Docker with fakes; the
+real sensor, the systemd service, and a real overheat are Phase 7.
 
 - [ ] `[ ]` Pure logic: `should_shut_down(temp_c, threshold_c)`. *Test first.*
 - [ ] `[ ]` `parse_temp(output)` for `vcgencmd measure_temp`. *Test first with
   sample strings.*
 - [ ] `[ ]` `read_temp_c()`: the one hardware-touching function (calls
-  `vcgencmd`).
+  `vcgencmd`). Mocked in Docker/tests; exercised for real in Phase 7.
 - [ ] `[ ]` `watchdog_tick(read_temp=..., threshold_c=...)`: inject the reader;
   on overheat, terminate the running emulator, then shut down. *Test with a fake
   reader.*
-- [ ] `[ ]` systemd unit for the watchdog; enable on boot.
-- [ ] `[ ]` Verify **on real Pi**: under sustained load, temp is read correctly,
-  and a forced/simulated overheat triggers emulator kill + shutdown.
+- [ ] `[ ]` Verify **in Docker**: run `watchdog_tick` with an injected fake
+  reader that crosses the threshold; assert it terminates a fake emulator
+  process and calls a fake shutdown — no real `vcgencmd`/`shutdown`.
 
-**Done when:** the watchdog runs as a service on the Pi and demonstrably acts on
-overheating, independent of the launcher.
+**Done when:** the watchdog logic and tick behavior are verified in Docker with
+fakes. *(Running as a real systemd service and acting on a real overheat is a
+Phase 7 checkpoint.)*
 
 ---
 
@@ -115,35 +136,37 @@ Now make adding games easy over the network, replacing manual DB/file work.
 - [ ] `[ ]` `DELETE /games/{id}` — remove row + files. *Test first.*
 - [ ] `[ ]` Reuse `shared/db.py` and `shared/paths.py` — no second copy of the
   schema or path logic.
-- [ ] `[ ]` Run the API under uvicorn; confirm it's reachable from the MacBook
-  over Tailscale.
-- [ ] `[ ]` End-to-end: `POST` a game from the Mac → it appears in the CLI list
-  on the Pi → it launches.
+- [ ] `[ ]` Run the API under uvicorn **in the container**; confirm it's
+  reachable from the host over a mapped port.
+- [ ] `[ ]` End-to-end **in Docker**: `POST` a game to the API → it appears in
+  the CLI list (shared DB/volume) → it launches (headless).
 
-**Done when:** you can add a game from the MacBook and immediately play it on the
-Pi, no manual file copying.
+**Done when:** from the host you can `POST` a game to the containerized API and
+immediately see and launch it via the CLI in the container. *(Doing this
+MacBook→Pi over Tailscale is a Phase 7 checkpoint.)*
 
 ---
 
 ## Phase 5 — Pygame gallery GUI
 
-The kid-facing experience. Only now, once everything underneath works.
+The kid-facing experience. Only now, once everything underneath works. The pure
+UI logic is testable headless in Docker; the actual rendering, controller input,
+fullscreen, and boot-into-gallery need a real display + stick and are Phase 7.
 
 - [ ] `[ ]` Pure UI logic first (no display): selection movement, grid paging,
-  mapping a selection to a `Game`. *Test first with a fake input source.*
+  mapping a selection to a `Game`. *Test first with a fake input source, headless
+  in Docker.*
 - [ ] `[ ]` Render the gallery: grid of cover art, title, small console label.
+  *(Needs a display — verify on hardware in Phase 7.)*
 - [ ] `[ ]` Controller input adapter: arcade stick/buttons via USB encoder;
-  behind a small interface so UI logic tests use a fake.
+  behind a small interface so UI logic tests use a fake. *(Real input verified in
+  Phase 7.)*
 - [ ] `[ ]` Launch on select (reuse `build_command` + `run_game`), return to the
   gallery on exit.
-- [ ] `[ ]` Fullscreen at 1080p; make it boot straight into the gallery
-  (systemd/autostart).
-- [ ] `[ ]` Optional: Bluetooth gamepad support.
-- [ ] `[ ]` Verify **on real Pi**: real display, real stick + real gamepad,
-  smooth navigation, launch and return.
 
-**Done when:** the Pi boots into the gallery and a kid can pick a game by cover
-art with the stick/gamepad and play — the core project goal.
+**Done when:** the UI logic (navigation, paging, selection→`Game`) is fully
+tested headless in Docker. *(The kid-facing "boots into the gallery, pick by
+cover art with the stick, play" experience is the Phase 7 goal.)*
 
 ---
 
@@ -156,8 +179,35 @@ Everything that's genuinely optional. Do only what's wanted.
 - [ ] `[ ]` Cover-art fallback for games without art.
 - [ ] `[ ]` **Experimental:** try Hard Truck 2 via Box64 + Wine, isolated. If it
   runs acceptably, add it as a normal `Game` whose command is the Box64/Wine
-  invocation — no special-casing in the launcher. If not, drop it.
-- [ ] `[ ]` Any real-hardware performance tuning that surfaced along the way.
+  invocation — no special-casing in the launcher. If not, drop it. *(Real
+  performance judged on hardware in Phase 7.)*
 
-**Done when:** the cabinet does everything wanted and the experiment is either in
-(as a normal gallery entry) or cleanly dropped.
+**Done when:** the optional local pieces that are wanted are in and tested in
+Docker; the experiment is either wired in (as a normal `Game`) or cleanly
+dropped.
+
+---
+
+## Phase 7 — Real hardware bring-up (needs the physical Pi)
+
+The deferred hardware checkpoints, collected here to run **once the Raspberry Pi
+is in hand**. Nothing here blocks local progress; it's the final validation that
+what we built in Docker also works on the real cabinet.
+
+- [ ] `[ ]` **CLI:** on the Pi, one game per system boots and is playable at
+  acceptable performance (this is the first real-hardware checkpoint; N64/PS1 are
+  the risky ones).
+- [ ] `[ ]` **Watchdog:** systemd unit enabled on boot; under sustained load the
+  temp is read correctly; a forced/simulated overheat triggers emulator kill +
+  shutdown, independent of the launcher.
+- [ ] `[ ]` **API:** reachable from the MacBook over Tailscale; end-to-end `POST`
+  a game from the Mac → it appears in the CLI list on the Pi → it launches, no
+  manual file copying.
+- [ ] `[ ]` **Gallery:** real display, fullscreen at 1080p; real arcade stick +
+  real gamepad, smooth navigation, launch and return; boots straight into the
+  gallery (systemd/autostart). Optional: Bluetooth gamepad support.
+- [ ] `[ ]` Any real-hardware performance tuning that surfaced along the way; the
+  Box64/Wine experiment judged on real hardware.
+
+**Done when:** the Pi boots into the gallery and a kid can pick a game by cover
+art with the stick/gamepad and play — the core project goal.
