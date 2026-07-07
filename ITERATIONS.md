@@ -89,7 +89,8 @@ that we can drive RetroArch/DuckStation correctly.
     - [x] Fetch the Stella-based `stella2014` core (only Atari 2600 core built for
       arm64) from the libretro buildbot into `/usr/lib/libretro/` in
       `Dockerfile.play`, keyed off `uname -m` so it works on arm64 and x86_64.
-    - [ ] Add a free/homebrew Atari 2600 ROM into the image.
+    - [x] Add a free/homebrew Atari 2600 ROM into the image (2048-2600 by
+      chesterbr, MIT-licensed, at `/roms/atari2600/2048.bin`).
   - [ ] Install a **PS1 emulator** matching the launcher's PS1 path
     (`build_command` runs standalone `duckstation <rom>`). DuckStation isn't in
     Debian and is primarily x86_64 — confirm an arm64 build works in the

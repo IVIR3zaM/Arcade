@@ -14,6 +14,11 @@ new dated version section.
 
 ### Added
 
+- `Dockerfile.play`: a free, homebrew Atari 2600 ROM — 2048-2600 by chesterbr,
+  MIT-licensed (so it's genuinely redistributable inside the image) — is now
+  fetched at build time to `/roms/atari2600/2048.bin`, matching the launcher's
+  `/roms/<console>/` `rom_path` convention. Gives the real-emulator env something
+  to actually launch. (CLI wiring to this path lands in a follow-up step.)
 - `Dockerfile.play`: the Atari 2600 Stella core (`stella2014`, the only 2600 core
   the libretro buildbot builds for arm64) is now fetched into `/usr/lib/libretro/`
   at build time, keyed off `uname -m` so it resolves the right buildbot arch dir

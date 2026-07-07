@@ -27,6 +27,17 @@ RUN set -eux; \
     rm /tmp/stella.zip; \
     test -f /usr/lib/libretro/stella2014_libretro.so
 
+# A free, homebrew Atari 2600 ROM so there's something to actually launch. This is
+# "2048-2600" by Carlos Duarte do Nascimento (chesterbr) — an original homebrew game
+# released under the MIT license, so it's genuinely free to redistribute inside this
+# image (unlike most 2600 homebrew, which is only cleared for its own site). ROMs live
+# under /roms/<console>/, matching the launcher's rom_path convention.
+RUN set -eux; \
+    mkdir -p /roms/atari2600; \
+    curl -fL -o /roms/atari2600/2048.bin \
+        "https://raw.githubusercontent.com/chesterbr/2048-2600/main/2048.bin"; \
+    test -s /roms/atari2600/2048.bin
+
 # Headless display + force software rendering (no GPU in the container).
 ENV DISPLAY=:99 \
     LIBGL_ALWAYS_SOFTWARE=1
