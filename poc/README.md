@@ -80,18 +80,19 @@ and architecture — but not per-core *speed*. An Apple-Silicon core is ~2-3× a
 you see as an **optimistic upper bound**; real performance is the Phase 8.9
 hardware checkpoint. Give Docker Desktop ≥ 8 GB (Settings → Resources).
 
-**Reality check on the model size (read this).** This was the main thing the PoC
-tested, and the result is clear: **a 3B model is too weak to be the manager.** It
-handles simple flows (greet + look you up, launch a game, save a guest) but
-under-calls tools on harder ones — e.g. it won't turn a natural "turn the camera
-off at night" into the `set_privacy_schedule` call (it just goes quiet). **7B
-gets it right** — natural-language privacy scheduling, admin refusals, fuzzy game
-launch, all reliably. So the default is `qwen2.5:7b`. Drop to the faster/lighter
-3B (simple flows only) with:
+**What the PoC found (read this).** A 3B model *cannot* be an autonomous
+many-tools agent — given one big prompt with a dozen tools it under-calls them and
+sometimes goes silent. But **split into small atomic steps** (intent → code →
+phrase) with access control in code, **a 3B works**: greeting, fuzzy game launch,
+remembering preferences, admin privacy scheduling, and code-enforced refusals all
+run correctly. On the Pi-accurate 4-core cap this lands at **~3–5 s per turn**
+(one intent call + one phrasing call; canned replies like goodbye are ~1 s).
 
-```bash
-COMPANION_MODEL=qwen2.5:3b ./run.sh     # faster, but a much weaker manager
-```
+Two things made the difference and are worth remembering for the real build:
+`num_thread` must match the core count (the container sees all host cores but is
+CPU-throttled to 4 — left unpinned, Ollama spawns too many threads and fights the
+throttle, ~4× slower), and the model stays resident (`OLLAMA_KEEP_ALIVE=-1`) so
+there's no reload per turn. Want nicer wording at higher latency? `COMPANION_MODEL=qwen2.5:7b ./run.sh`.
 
 ## Run it
 
