@@ -1,0 +1,37 @@
+"""Speech-to-text via faster-whisper (the whisper.cpp family, CPU int8).
+
+Mirrors Phase 8's STT choice while staying easy to install in the image. The
+model is loaded once and reused. Kept behind one small function so the pure logic
+never depends on it.
+"""
+
+import os
+
+from faster_whisper import WhisperModel
+
+# 'base' is multilingual (EN + DE) and small enough to feel Pi-like on CPU.
+_MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
+
+_model: WhisperModel | None = None
+
+
+def _get_model() -> WhisperModel:
+    global _model
+    if _model is None:
+        _model = WhisperModel(_MODEL_NAME, device="cpu", compute_type="int8")
+    return _model
+
+
+def transcribe(
+    wav_path: str, language: str | None = None, initial_prompt: str | None = None
+) -> str:
+    """Transcribe a WAV file to text.
+
+    `language` hints whisper ('en'/'de'); `initial_prompt` biases decoding toward
+    the arcade's real game + people names so it stops mishearing them (e.g. "Pong"
+    instead of "Point").
+    """
+    segments, _ = _get_model().transcribe(
+        wav_path, language=language, initial_prompt=initial_prompt, beam_size=1
+    )
+    return "".join(segment.text for segment in segments).strip()

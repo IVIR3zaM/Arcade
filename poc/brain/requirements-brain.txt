@@ -1,0 +1,8 @@
+# The Pi-brain container's Python deps. Pinned loosely; this is a PoC image.
+fastapi
+uvicorn[standard]
+pydantic
+requests
+numpy
+faster-whisper
+piper-tts

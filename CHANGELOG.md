@@ -14,6 +14,33 @@ new dated version section.
 
 ### Added
 
+- `poc/`: a throwaway **Phase 8 experience PoC** that tests whether a small
+  on-device LLM can be the arcade's **tool-calling manager** — run `poc/run.sh`
+  on the Mac, pick a scenario, and talk to the cabinet by voice. A **single**
+  container mirrors the cabinet's Pi 5 (8GB): Debian 12 Bookworm arm64 (what
+  Raspberry Pi OS is), capped at **4 cores / 8GB shared**, running the whole
+  pipeline in one box — **faster-whisper** STT (biased to the real names),
+  **Ollama** (`qwen2.5:3b` default, `COMPANION_MODEL`-overridable) in a
+  tool-calling loop, **Piper** TTS. The LLM drives everything through an MCP-style
+  tool surface it must call — `get_player`, `list_games`, `recommend_game`,
+  `launch_game`/`close_game`, `assign_joystick`, `create_profile`/`delete_profile`,
+  `remember`, `get_context`, `set_privacy_schedule` — and **every tool call is
+  printed in the CLI** so you can see what it did. Tools **enforce truth** (e.g.
+  `launch_game` fuzzy-matches a misheard "Point" back to "Pong" and refuses
+  unknown games; privacy changes are admin-gated), so the model orchestrates but
+  can't invent facts. Profiles, learned per-person memory ("only plays after
+  5pm"), and admin privacy schedules persist in a **real SQLite** DB in a volume
+  (survives restarts); Pi hardware (temp, mic/camera state) is mocked behind small
+  functions. The AI models are fetched on first run into cached volumes, keeping
+  the image build small. The MacBook's mic + speakers stand in for the Pi's
+  speakerphone (Docker Desktop can't reach host audio). Documented caveats: this
+  matches the Pi's core count/RAM/OS/arch but not per-core clock speed (latency is
+  an optimistic upper bound; real perf is Phase 8.9), and a 3B model under-calls
+  tools on harder requests — a stronger model (`qwen2.5:7b` / `llama3.1:8b`) is a
+  drop-in. Deterministic core (tools, store, agent loop, privacy-window logic,
+  analytics) is unit-tested with no model/audio/network (`cd poc && python3 -m
+  pytest tests`). Separate from the real dev env and entirely optional; documented
+  in `poc/README.md`.
 - `make docker-play`: the copyrighted PS1 BIOS is now supplied by the user and
   mounted read-only into DuckStation instead of being baked into the image. Drop
   it in `bios/ps1/` (overridable via `PS1_BIOS_DIR`); the directory's contents are

@@ -1,0 +1,7 @@
+# The brain image only needs brain/ and its requirements — keep the host venv,
+# host CLI, tests, and caches out of the build context.
+.venv/
+host/
+tests/
+__pycache__/
+*.pyc

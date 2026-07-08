@@ -1,0 +1,40 @@
+# One container = one Pi. It runs Ollama + whisper + Piper + the brain API, all
+# sharing a single 4-core / 8GB budget, mirroring the cabinet's Raspberry Pi 5
+# (8GB). On the real Pi these all contend for one board's resources; capping this
+# one container the same way is the faithful analog (two separately-capped
+# containers could exceed a Pi's shared pool).
+#
+# CAVEAT: this matches core COUNT and RAM, not per-core SPEED — Apple-Silicon
+# cores are ~2-3x a Pi 5 core and Docker can't throttle to Pi clock. Treat the
+# latency you see as an optimistic upper bound; real numbers are Phase 8.9.
+#
+# NOTE: give Docker Desktop at least 8GB (Settings → Resources) or the 8g limit
+# will squeeze the host. First run downloads the models (LLM ~2GB + whisper +
+# voices) into the pi_models volume; later runs reuse them.
+services:
+  pi-box:
+    build:
+      context: .
+      dockerfile: brain/Dockerfile
+    environment:
+      OLLAMA_URL: http://localhost:11434  # Ollama runs inside this same container
+      # 3b is the target: the turn is split into small atomic calls (intent, then
+      # phrasing) it can handle fast on Pi-class CPU. Try qwen2.5:7b for nicer
+      # wording at higher latency.
+      COMPANION_MODEL: qwen2.5:3b
+      OLLAMA_KEEP_ALIVE: "-1"  # keep the model resident so turns don't reload it
+      OLLAMA_MODELS: /models/ollama        # keep the LLM in the cached volume
+      HF_HOME: /models/hf                  # keep the whisper model in the volume
+      VOICES_DIR: /models/voices           # keep the Piper voices in the volume
+      ARCADE_DB: /data/arcade.db           # persistent profiles, memory, schedules
+    volumes:
+      - pi_models:/models  # caches the LLM, whisper model, and voices across runs
+      - pi_data:/data      # the arcade's memory — survives restarts
+    cpus: "4"
+    mem_limit: 8g
+    ports:
+      - "8080:8000"  # the host mic/speaker CLI talks to localhost:8080
+
+volumes:
+  pi_models:
+  pi_data:

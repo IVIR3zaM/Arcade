@@ -1,0 +1,5 @@
+# Deps for the host CLI that runs on the MacBook (not in Docker). Kept tiny: it
+# only records the mic, talks HTTP to the brain, and plays WAVs via `afplay`.
+requests
+numpy
+sounddevice
