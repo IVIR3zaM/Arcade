@@ -14,6 +14,11 @@ new dated version section.
 
 ### Added
 
+- `make docker-play`: the copyrighted PS1 BIOS is now supplied by the user and
+  mounted read-only into DuckStation instead of being baked into the image. Drop
+  it in `bios/ps1/` (overridable via `PS1_BIOS_DIR`); the directory's contents are
+  git-ignored (a `bios/ps1/README.md` explains it). Documented in `README.md`.
+  (Homebrew/free PS1 content + the actual smoke test land in follow-up steps.)
 - `Dockerfile.play`: the PS1 emulator DuckStation is now installed. Its official
   arm64 AppImage is fetched at build time (keyed off `uname -m`; recent
   DuckStation is CC-BY-NC-ND so the binary is never committed), `--appimage-extract`-ed
@@ -39,6 +44,19 @@ new dated version section.
 
 ### Changed
 
+- Planned **Phase 8 — local AI companion** in `ITERATIONS.md`: an optional,
+  strictly-additive, **all on-device (no cloud)** voice + camera assistant built
+  on top of the finished arcade. It recognizes who is at the cabinet, greets them
+  by name in English/German, knows their play history and time budget, suggests a
+  game and which joystick to use, logs sessions, and has a consented, deletable
+  guest/party mode. Built the same way as everything else (TDD, testable
+  off-device with fakes; real sensors are the Phase-8 hardware bring-up). Core
+  design constraint: **deterministic code owns the facts, the LLM only phrases
+  them**, and nothing ever leaves the Pi.
+- Bumped the core-build Pi to **8GB** in `README.md` (headroom for the Phase 8
+  companion) and documented the companion's optional add-on hardware (AI HAT+,
+  Camera Module 3, USB speakerphone, active cooling) plus a scope note that it
+  does not change the one-screen, one-game-at-a-time build.
 - Reframed the real-emulator Docker work in `ITERATIONS.md` as a full local dev
   environment (not a PoC) that mirrors the Pi's emulator stack, and planned the
   missing **PS1 emulator** (standalone DuckStation, with an arm64/BIOS caveat and

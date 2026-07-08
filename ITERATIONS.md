@@ -20,6 +20,11 @@ tested** — locally in Docker for now. Don't start a later phase until the curr
 one runs. Follow [AGENTS.md](AGENTS.md) throughout — TDD, KISS/YAGNI, keep the
 stack.
 
+**Phases 0–7 are the arcade** — that's the whole core project. **Phase 8 is a
+separate, optional, on-device AI companion** (voice + camera) built on top of the
+finished arcade; it is all-local (no cloud) and strictly additive. Don't start it
+until the arcade works, and never let it become a dependency of the arcade.
+
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ---
@@ -99,8 +104,12 @@ that we can drive RetroArch/DuckStation correctly.
       (keyed off `uname -m`), `--appimage-extract` it (no FUSE in containers), and
       expose the extracted `AppRun` as `duckstation` on `PATH`. Verified in the
       built image.
-    - [ ] Provide a PS1 BIOS the user supplies (copyrighted — mounted, never baked
+    - [~] Provide a PS1 BIOS the user supplies (copyrighted — mounted, never baked
       in) plus homebrew/free PS1 content for a smoke test.
+      - [x] Mount the user-supplied BIOS read-only into DuckStation via
+        `make docker-play` (`bios/ps1/`, overridable with `PS1_BIOS_DIR`); contents
+        git-ignored, never baked in. Documented in `README.md` + `bios/ps1/README.md`.
+      - [ ] Add homebrew/free PS1 content into the image for the smoke test.
   - [ ] Point the CLI library at the real ROM path(s) and launch a game per
     console (Atari 2600 via RetroArch, PS1 via DuckStation) from
     `python -m launcher.cli`, watched over VNC.
@@ -241,3 +250,167 @@ what we built in Docker also works on the real cabinet.
 
 **Done when:** the Pi boots into the gallery and a kid can pick a game by cover
 art with the stick/gamepad and play — the core project goal.
+
+---
+
+## Phase 8 — Local AI companion (all on-device, no cloud)
+
+A voice + camera assistant layer built **on top of the finished arcade** (Phases
+0–7). It recognizes who is at the cabinet, greets them **by name in their
+language (English or German, English default)**, knows their play history and how
+much time they have today, suggests a game, tells them **which joystick to use**,
+and logs every session. It includes a **guest / party mode** with consented,
+locally-stored, deletable profiles.
+
+**This phase is strictly additive and opt-in.** The arcade must keep working with
+none of it. It is built the same way as everything else — **iteratively, TDD,
+testable off-device with fakes** (fake camera, mic, LLM); the real sensors are
+Phase-7-style hardware checkpoints collected in **8.9**.
+
+**Everything is on-device. Nothing ever leaves the Pi — no cloud.** This is the
+core constraint that keeps the whole thing GDPR-simple (household, local-only),
+and it is deliberate: we evaluated and **rejected** any cloud LLM / offload path.
+
+### Hardware this phase adds (all optional to the arcade)
+
+- Pi 5 **8GB** (already provisioned in the core build).
+- **Raspberry Pi AI HAT+ (Hailo-8L)** — runs face detection + face embeddings on
+  the accelerator; only tiny vectors come back to the Pi CPU, so recognition
+  barely touches the CPU and leaves it free for speech + the LLM.
+- **Camera Module 3.**
+- **USB speakerphone** (mic + speaker with echo cancellation) — *not* a Bluetooth
+  mic.
+- **Active cooling** — sustained LLM inference is a new 100%-CPU heat source on a
+  Pi that already runs hot; the temperature watchdog (Phase 3) still guards it.
+
+### The golden rule (design constraint for the whole phase)
+
+**Deterministic code owns the facts; the LLM owns only language.** SQLite +
+plain Python decide *what is true* (who is present, play history, trends, time
+budgets, turn order). The local LLM only turns a compact structured summary into
+a friendly spoken sentence in EN/DE. A small on-device model cannot be trusted to
+reason over raw logs or schedule turns — so it never does.
+
+- **Vision:** Hailo face detect + ArcFace embeddings; the Pi does a trivial
+  nearest-neighbour match against local profiles. Handles multiple faces at once.
+- **STT:** `whisper.cpp` (multilingual, EN + DE).
+- **TTS:** Piper (fast, has EN + DE voices).
+- **LLM:** a small 4-bit model (Qwen2.5-3B / Gemma-3-4B) via Ollama/llama.cpp,
+  used only as the narrator over a structured "brief".
+
+### Privacy constraints (hard rules, tested)
+
+- All data local; nothing leaves the Pi.
+- Face embeddings and names stored **only** locally.
+- Guest profiles are **opt-in**, naming is optional, **deletable any time**, and
+  **auto-expire** unless the guest asks to keep them.
+- Conversations and sessions are logged locally, per profile.
+
+### 8.1 — Profiles & session logging (pure data, no hardware)
+
+- [ ] `[ ]` `profiles` table: id, name, language pref (EN/DE), is_guest, consent,
+  created_at, expires_at (nullable). *Test first, temp SQLite.*
+- [ ] `[ ]` `sessions` table: profile_id, game_id, started, ended, duration,
+  co_players. *Test first.*
+- [ ] `[ ]` Pure analytics over history: `favorite_game`, `recent_trend(window)`
+  (e.g. "sports → shooter"), `prefers_multiplayer`, `favorite_partner`,
+  `time_budget_remaining(profile, today)`. *Test first with a fake history.*
+
+**Done when:** given a fake history, the analytics functions return the correct
+facts, tested off-device.
+
+### 8.2 — Recognition adapter (mockable)
+
+- [ ] `[ ]` `VisionSource` interface: `present_faces() -> list[embedding]`
+  (real impl = camera + Hailo; tests use a fake).
+- [ ] `[ ]` Pure `match(embeddings, profiles, threshold) -> [profile | UNKNOWN]`
+  — known within threshold → match, far → guest. *Test first with fake vectors,
+  including several faces at once.*
+
+**Done when:** the matcher correctly classifies known vs. unknown from fake
+embeddings, off-device.
+
+### 8.3 — The "brief" (deterministic context builder)
+
+- [ ] `[ ]` `build_brief(present_profiles, histories, budgets, now) -> dict` — the
+  structured summary handed to the LLM (name, language, budget_left, top_game,
+  trend, partner_present, is_guest, which joystick/side …). Pure. *Test first.*
+
+**Done when:** given fake state, `build_brief` returns exactly the expected
+structured summary. This is the only object the LLM is allowed to see.
+
+### 8.4 — Voice I/O (mockable)
+
+- [ ] `[ ]` STT adapter (whisper.cpp) and TTS adapter (Piper) behind interfaces;
+  tests use text stubs (no audio).
+- [ ] `[ ]` Language selection: per-profile preference, English default, German
+  for German profiles. *Test first.*
+
+**Done when:** a fake STT transcript flows through to a TTS utterance, verified
+off-device with stubs.
+
+### 8.5 — Local LLM narrator
+
+- [ ] `[ ]` Ollama client wrapper: system prompt = persona; input = the brief;
+  output = a short EN/DE utterance.
+- [ ] `[ ]` Enforce the golden rule: the narrator may only phrase the brief's
+  facts — it never invents history, budgets, or turn order. *Test with a mocked
+  model asserting the prompt carries only the brief; optional live smoke test.*
+
+**Done when:** given a brief + a stubbed model, the narrator produces a greeting
+and the prompt contains only the brief's facts.
+
+### 8.6 — Interaction flow / orchestration
+
+- [ ] `[ ]` State machine: idle → face detected → identify → **known:** greet by
+  name, state time budget, suggest a game, say which joystick to use → **unknown:**
+  offer guest play + optional consented profile → hand off to the existing
+  launcher → on return, log the session → wrap up. *Test the transitions with all
+  fakes.*
+- [ ] `[ ]` The assistant is **idle during gameplay** — the emulator owns the Pi;
+  vision + LLM are paused (time-multiplex). Make this explicit and tested.
+
+**Done when:** the full flow runs off-device with fakes (vision, STT/TTS, LLM,
+launcher), producing correct transitions and session logs.
+
+### 8.7 — Guest & party mode
+
+- [ ] `[ ]` New face → guest; play allowed immediately; afterwards the assistant
+  asks (voice) whether to save a **named, consented** profile — stored locally,
+  deletable, auto-expiring.
+- [ ] `[ ]` **Party mode:** many guests, ephemeral profiles auto-created; log who
+  played what, for how long, and with whom.
+- [ ] `[ ]` "Making the rounds": a **deterministic turn scheduler** (fair queue)
+  that the assistant *voices* — plus kids' time-limit rules enforced. The
+  intelligence is the scheduler; the LLM only announces it. *Test with a party
+  simulation of several fake guests.*
+
+**Done when:** a party simulation with several fake guests produces correct
+per-guest logs, a fair turn order, and consented/deletable profiles — all
+off-device.
+
+### 8.8 — GUI integration (the speaking side + the gallery)
+
+- [ ] `[ ]` The Pygame gallery gains a companion side: show who is recognized, the
+  assistant's spoken line as text, and the suggested game highlighted. Pure UI
+  logic tested headless; actual rendering is a hardware checkpoint (8.9).
+
+**Done when:** the companion UI logic (recognized user → highlighted suggestion +
+transcript panel) is tested headless.
+
+### 8.9 — Real-hardware bring-up (needs the AI HAT + camera + speakerphone)
+
+- [ ] `[ ]` AI HAT+ installed; the camera recognizes the family at the cabinet in
+  real lighting; unknown faces fall through to a spoken "are you X, or a guest?"
+  rather than mislogging.
+- [ ] `[ ]` Whisper + Piper real latency is acceptable; LLM tok/s is acceptable
+  for **terse** replies.
+- [ ] `[ ]` Thermals OK under LLM + idle with active cooling; the assistant is
+  genuinely idle during gameplay (no frame-rate hit to the emulator); the
+  watchdog still protects the Pi.
+- [ ] `[ ]` End-to-end: walk up → greeted by name in the right language → get a
+  game suggestion + joystick hint → play → session logged. Nothing leaves the Pi.
+
+**Done when:** at the real cabinet, a known person is greeted by name in their
+language, gets a suggestion and a joystick hint, plays, and the session is logged
+— entirely on-device.

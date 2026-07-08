@@ -4,3 +4,7 @@
 __pycache__/
 data/
 *.db
+
+# User-supplied, copyrighted PS1 BIOS — never commit it (keep the README).
+bios/ps1/*
+!bios/ps1/README.md

@@ -21,13 +21,36 @@ and play. No menus. No file managers. No drama.
 
 | Part | Choice |
 | --- | --- |
-| Computer | Raspberry Pi 5, 4GB |
+| Computer | Raspberry Pi 5, **8GB** |
 | OS | Raspberry Pi OS 64-bit **Lite** (no desktop) |
 | Storage | USB SSD (boot from USB, not SD card) |
 | Display | Samsung 27" 1080p, single monitor over HDMI |
 | Controls | Two-player arcade joystick + buttons via USB zero-delay encoder |
 | Optional controls | Bluetooth gamepad |
 | Audio | HDMI audio (monitor speakers) or a small amp — TBD during the build |
+| Cooling | Active cooler / fan (the emulators run the Pi hot; see the watchdog) |
+
+The Pi is an **8GB** model. The arcade itself (Phase 1) runs fine on less, but 8GB
+is chosen up front to leave headroom for the **local AI companion** planned in
+Phase 2 (voice + on-device LLM). That is the *only* forward-looking hardware
+decision baked into the core build — everything else the companion needs is
+separate, optional add-on hardware (see below), and the arcade must keep working
+without any of it.
+
+### Future — Phase 2: local AI companion (optional, additive)
+
+A later, opt-in layer that adds a voice + camera assistant on top of the finished
+arcade. **Everything runs on-device — no cloud, no data ever leaves the Pi.** It
+is deliberately kept out of the core build; it does not change the one-screen,
+one-game-at-a-time scope. The extra hardware it needs:
+
+| Part | Purpose |
+| --- | --- |
+| Raspberry Pi AI HAT+ (Hailo-8L) | Face detection + recognition offloaded from the CPU |
+| Camera Module 3 | See who is at the cabinet |
+| USB speakerphone (mic + speaker, echo-cancelling) | Far-field voice in/out — **not** a Bluetooth mic |
+
+See [ITERATIONS.md](ITERATIONS.md), **Phase 8**, for the full plan.
 
 ## Software stack
 
@@ -65,6 +88,12 @@ This is a **single-monitor, one-emulator-at-a-time** build. We explicitly
 considered and **rejected** a dual-monitor, multi-mode (mirror/split/
 independent) setup with a GPIO rotary switch. Do not design around that. One
 screen, one game running at a time, keep it simple.
+
+The **local AI companion (Phase 8)** does not change this. It is a separate,
+later, opt-in layer that still runs one game at a time on the one screen — the
+assistant is *idle while a game plays* (the emulator owns the Pi), and it is all
+on-device with no cloud. Build the arcade (Phases 0–7) first; the companion is
+strictly additive and the arcade must always work without it.
 
 ## How it's built (iteratively)
 
@@ -120,6 +149,12 @@ make docker-play   # build the real-emulator image and serve a VNC desktop
 `make docker-play` exposes a desktop on `localhost:5900` — connect any VNC viewer
 (macOS: Finder → Go → Connect to Server → `vnc://localhost:5900`) to watch
 RetroArch/DuckStation run inside the container.
+
+For PS1, DuckStation needs a copyrighted BIOS. It's never baked into the image:
+drop your own copy in `bios/ps1/` (e.g. `bios/ps1/scph5501.bin`) and
+`make docker-play` mounts that directory read-only into DuckStation. Use a
+different location with `make docker-play PS1_BIOS_DIR=/path/to/bios`. See
+[bios/ps1/README.md](bios/ps1/README.md).
 
 > A UTM (QEMU ARM64) VM running real Raspberry Pi OS is an optional alternative
 > for whole-system checks, but Docker is the default local target.
