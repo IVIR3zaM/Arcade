@@ -31,8 +31,9 @@ fetch_voice() {
         curl -fL -o "$VOICES_DIR/$name.json" "$VOICES_BASE/$rel/$name.json"
     fi
 }
-fetch_voice "en/en_US/lessac/medium" "en_US-lessac-medium.onnx"
-fetch_voice "de/de_DE/thorsten/medium" "de_DE-thorsten-medium.onnx"
+fetch_voice "en/en_US/kristin/medium" "en_US-kristin-medium.onnx"
+fetch_voice "de/de_DE/ramona/low" "de_DE-ramona-low.onnx"
+fetch_voice "fa/fa_IR/amir/medium" "fa_IR-amir-medium.onnx"
 
 # Warm the whisper model into the cache (HF_HOME points into the volume) so the
 # first transcription doesn't stall.

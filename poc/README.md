@@ -65,7 +65,10 @@ The cabinet also manages its own **monitor**: on when a person appears in frame,
 on/off by voice, and **off automatically** when nothing has happened for ~2
 minutes with no game running (the CLI polls `/tick`, so you see it happen).
 **German is the default language** for guests; known people get their saved
-language, and "speak English" / "sprich Deutsch" switches it (and persists it).
+language. Whisper **auto-detects the language of every utterance** (forcing the
+session language would mangle English speech into German gibberish), so Arc
+simply answers in whichever of EN/DE you speak — and an explicit "speak
+English" / "sprich Deutsch" still switches and persists it on your profile.
 
 **The actions (`brain/tools.py`)** — every one is printed in the CLI as it runs:
 

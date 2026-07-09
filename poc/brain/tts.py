@@ -12,8 +12,9 @@ import tempfile
 # Voice models fetched into the cached volume on first run (see entrypoint.sh).
 _VOICES_DIR = os.environ.get("VOICES_DIR", "/models/voices")
 _VOICES = {
-    "en": f"{_VOICES_DIR}/en_US-lessac-medium.onnx",
-    "de": f"{_VOICES_DIR}/de_DE-thorsten-medium.onnx",
+    "en": f"{_VOICES_DIR}/en_US-kristin-medium.onnx",
+    "de": f"{_VOICES_DIR}/de_DE-ramona-low.onnx",
+    "fa": f"{_VOICES_DIR}/fa_IR-amir-medium.onnx",
 }
 
 

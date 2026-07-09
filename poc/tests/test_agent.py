@@ -187,6 +187,30 @@ def test_name_comes_from_the_utterance_not_the_model():
     assert store.get_profile(sess.conn, "Profil") is None
 
 
+def test_language_request_is_matched_in_code_without_the_model():
+    def boom(system, user, as_json=False):
+        raise AssertionError("a language request must not need the model")
+
+    sess = _session(["unknown"])
+    _text, actions, kind = agent.handle_turn(
+        sess, "Can you speak any English?", "de", chat=boom
+    )
+    assert kind == "language_set"
+    assert sess.new_language == "en"
+    assert "(matched in code)" in actions[0]["summary"]
+
+    assert agent.language_request("Sprich bitte Deutsch") == "de"
+    assert agent.language_request("English!") == "en"
+    # Merely mentioning a language in a longer sentence is not a request.
+    assert (
+        agent.language_request(
+            "I read a long English book about arcade games yesterday"
+        )
+        is None
+    )
+    assert agent.language_request("let's play pong") is None
+
+
 def test_name_from_utterance():
     assert agent.name_from_utterance("save my profile, I'm Sam") == "Sam"
     assert agent.name_from_utterance("Ich heiße Mia Weber, bitte") == "Mia Weber"

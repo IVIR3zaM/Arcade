@@ -210,18 +210,43 @@ def turn(req: TurnRequest) -> Reply:
     with tempfile.NamedTemporaryFile(suffix=".wav") as wav:
         wav.write(base64.b64decode(req.audio_b64))
         wav.flush()
-        user_text = stt.transcribe(
+        # language=None → whisper auto-detects EN vs DE. Forcing the session
+        # language made whisper mangle English speech into German gibberish,
+        # so a guest (default de) could never ask to switch to English.
+        user_text, spoken_lang, lang_prob = stt.transcribe(
             wav.name,
-            language=state["language"],
+            language=None,
             initial_prompt=_whisper_prompt(state["present"]),
         )
+    # Trust whisper's pick with modest confidence: it already DECODED the audio
+    # in that language, so replying in the other one is always worse. (0.7 was
+    # too strict — "Can you speak any English?" transcribed as English yet the
+    # session stayed German.)
+    detected = spoken_lang if spoken_lang in ("en", "de") and lang_prob >= 0.5 else None
 
     actions: list[dict] = []
+    woke = False
     if state["attention"] == "idle":
         woke, rest = wake.split_wake(user_text)
         if not woke:
             # Players chatting with each other — none of Arc's business.
             return _ignored(req.session_id, state, user_text)
+
+    # Arc answers in the language the person actually spoke (German default
+    # stands until someone speaks English). Only for turns it responds to —
+    # overheard chatter never flips the language.
+    if detected and detected != state["language"]:
+        state["language"] = detected
+        actions.append(
+            {
+                "tool": "set_language",
+                "args": {"language": detected},
+                "summary": f"language → {detected} (heard "
+                + ("English)" if detected == "en" else "German)"),
+            }
+        )
+
+    if woke:
         state["attention"] = "engaged"
         state["last_activity"] = now
         if not hardware.monitor_on():

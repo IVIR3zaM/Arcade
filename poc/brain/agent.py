@@ -126,6 +126,7 @@ _INTENT_EXAMPLES = (
     '"turn off the screen" -> {"intent":"monitor","on":false}\n'
     '"mach den monitor wieder an" -> {"intent":"monitor","on":true}\n'
     '"speak English please" -> {"intent":"switch_language","language":"en"}\n'
+    '"can you speak any english?" -> {"intent":"switch_language","language":"en"}\n'
     '"sprich Deutsch" -> {"intent":"switch_language","language":"de"}\n'
     '"what time is it?" -> {"intent":"get_context"}\n'
     '"bye" -> {"intent":"goodbye"}\n'
@@ -281,6 +282,51 @@ def is_goodbye(text: str) -> bool:
     return bool(difflib.get_close_matches(t, _GOODBYES, n=1, cutoff=0.75))
 
 
+# Language requests are matched in code, not by the model: "Can you speak any
+# English?" was seen routed to get_context, after which the phrasing model
+# hallucinated "Ich kann kein Englisch sprechen". A language word plus any
+# speak-ish word is unambiguous — no model needed.
+_LANG_WORDS = {"en": ("english", "englisch"), "de": ("german", "deutsch")}
+_LANG_HINTS = {
+    "speak",
+    "speaks",
+    "talk",
+    "switch",
+    "language",
+    "can",
+    "know",
+    "please",
+    "sprich",
+    "sprichst",
+    "sprechen",
+    "rede",
+    "reden",
+    "kannst",
+    "sprache",
+    "auf",
+    "in",
+    "bitte",
+}
+
+
+def language_request(text: str) -> str | None:
+    """The language ('en'/'de') the person asked Arc to speak, or None."""
+    tokens = set(re.sub(r"[^\w\s]", " ", text.lower()).split())
+    if (
+        len(tokens) > 8
+    ):  # a long sentence merely *mentioning* a language isn't a request
+        return None
+    hit = None
+    for lang, words in _LANG_WORDS.items():
+        if tokens & set(words):
+            if hit:
+                return None  # both languages mentioned — ambiguous
+            hit = lang
+    if hit and (tokens & _LANG_HINTS or len(tokens) <= 2):
+        return hit
+    return None
+
+
 # For a create_profile intent, the name is extracted by CODE from the utterance,
 # never taken from the model: given "Erstell mir bitte ein Profil" the 3B was seen
 # returning name="Profil", name="Hersteller", even name="unspecified". A name only
@@ -419,7 +465,7 @@ def execute_intent(
 
     if kind == "switch_language":
         lang = intent.get("language")
-        if lang not in ("en", "de"):
+        if lang not in ("en", "de", "fa"):
             return "unclear", {}, actions
         speaker = _speaker(session)
         res = do(
@@ -582,7 +628,8 @@ _PHRASE_INSTRUCTION = {
     "greeting": "Greet the people in the facts by name, mention what you remember "
     "if anything, and offer the suggestion. Only if someone has known=false (an "
     "unrecognized guest), offer to save a profile — never offer that to known people.",
-    "context": "Answer the person's question naturally using the facts.",
+    "context": "Answer the person's question naturally using the facts. If the "
+    "facts don't contain the answer, say you're not sure — never make one up.",
 }
 
 
@@ -659,6 +706,9 @@ def handle_turn(
             note = " (name from reply)"
     if intent is None and is_goodbye(user_text):
         intent = {"intent": "goodbye"}
+        note = " (matched in code)"
+    if intent is None and (lang := language_request(user_text)):
+        intent = {"intent": "switch_language", "language": lang}
         note = " (matched in code)"
     if intent is None:
         intent = classify_intent(user_text, session.display_present(), chat=chat)

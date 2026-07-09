@@ -24,14 +24,17 @@ def _get_model() -> WhisperModel:
 
 def transcribe(
     wav_path: str, language: str | None = None, initial_prompt: str | None = None
-) -> str:
-    """Transcribe a WAV file to text.
+) -> tuple[str, str, float]:
+    """Transcribe a WAV file. Returns (text, detected_language, probability).
 
-    `language` hints whisper ('en'/'de'); `initial_prompt` biases decoding toward
-    the arcade's real game + people names so it stops mishearing them (e.g. "Pong"
-    instead of "Point").
+    `language=None` lets whisper AUTO-DETECT the spoken language — essential for
+    a bilingual cabinet: forcing 'de' makes whisper mangle English speech into
+    German gibberish instead of transcribing it. `initial_prompt` biases decoding
+    toward the arcade's real game + people names so it stops mishearing them
+    (e.g. "Pong" instead of "Point").
     """
-    segments, _ = _get_model().transcribe(
+    segments, info = _get_model().transcribe(
         wav_path, language=language, initial_prompt=initial_prompt, beam_size=1
     )
-    return "".join(segment.text for segment in segments).strip()
+    text = "".join(segment.text for segment in segments).strip()
+    return text, info.language, info.language_probability
