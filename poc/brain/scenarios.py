@@ -67,4 +67,9 @@ SCENARIOS: dict[str, dict] = {
         "description": "Reza (admin) walks up — can set privacy schedules (mic/camera off).",
         "present": ["Reza"],
     },
+    "nobody-home": {
+        "description": "Nobody in front of the cabinet — it listens quietly; say "
+        "'Hey Arc' from across the room and it invites you over.",
+        "present": [],
+    },
 }

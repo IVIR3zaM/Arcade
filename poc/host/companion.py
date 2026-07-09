@@ -180,8 +180,11 @@ def main() -> None:
         timeout=300,
     ).json()
     _print_actions(reply["actions"])
-    print(f"🕹  Arc: {reply['text']}\n")
-    _play(reply["audio_b64"])
+    if reply["text"]:
+        print(f"🕹  Arc: {reply['text']}\n")
+        _play(reply["audio_b64"])
+    else:
+        print("  (the cabinet stays dark and quiet...)\n")
 
     session_id = reply["session_id"]
     attention = reply.get("attention", "engaged")

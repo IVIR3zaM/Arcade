@@ -23,6 +23,9 @@ _VARIANTS = {
     "hallo ark",
     "he arc",
     "hey ак",
+    "هی آرک",  # whisper writes Farsi speech in Arabic script
+    "های آرک",
+    "هی ارک",
 }
 # How similar the first two words must be to "hey arc" to count as the wake phrase.
 _RATIO = 0.72
@@ -45,6 +48,6 @@ def split_wake(text: str) -> tuple[bool, str]:
     ):
         return True, " ".join(words[2:])
     # Just the name also works: "Arc, stop the game."
-    if words[0] in {"arc", "ark", "arg"}:
+    if words[0] in {"arc", "ark", "arg", "آرک", "ارک"}:
         return True, " ".join(words[1:])
     return False, ""

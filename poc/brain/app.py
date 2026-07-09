@@ -107,8 +107,8 @@ def _whisper_prompt(present_names: list[str]) -> str:
     games = ", ".join(g.title for g in GAMES)
     people = ", ".join(n for n in store.list_profile_names(store.connect()) if n)
     return (
-        f"Hey Arc. Tschüss. Erstell mir bitte ein Profil. Arcade games: {games}. "
-        f"People: {people}. {' '.join(present_names)}."
+        f"Hey Arc. Tschüss. Erstell mir bitte ein Profil. Can you speak Farsi? "
+        f"Arcade games: {games}. People: {people}. {' '.join(present_names)}."
     )
 
 
@@ -170,6 +170,25 @@ def start(req: StartRequest) -> Reply:
     }
     _SESSIONS[session_id] = state
 
+    if not present:
+        # Nobody in frame: monitor stays dark, no greeting — the cabinet just
+        # listens quietly for "Hey Arc" from across the room.
+        state["attention"] = "idle"
+        return Reply(
+            session_id=session_id,
+            text="",
+            audio_b64="",
+            language=state["language"],
+            actions=[
+                {
+                    "tool": "camera",
+                    "args": {},
+                    "summary": "nobody in frame — monitor stays off, listening for 'Hey Arc'",
+                }
+            ],
+            attention="idle",
+        )
+
     # Someone stepped into the camera frame → wake the monitor before speaking.
     hardware.set_monitor(True)
     actions = [
@@ -225,7 +244,9 @@ def turn(req: TurnRequest) -> Reply:
     # in that language, so replying in the other one is always worse. (0.7 was
     # too strict — "Can you speak any English?" transcribed as English yet the
     # session stayed German.)
-    detected = spoken_lang if spoken_lang in ("en", "de") and lang_prob >= 0.5 else None
+    detected = (
+        spoken_lang if spoken_lang in ("en", "de", "fa") and lang_prob >= 0.5 else None
+    )
 
     actions: list[dict] = []
     woke = False
@@ -235,17 +256,39 @@ def turn(req: TurnRequest) -> Reply:
             # Players chatting with each other — none of Arc's business.
             return _ignored(req.session_id, state, user_text)
 
+    if not state["present"]:
+        # "Hey Arc" heard, but the camera sees nobody at the cabinet — invite
+        # them over and go back to quiet listening.
+        actions.append(
+            {
+                "tool": "camera",
+                "args": {},
+                "summary": "wake word heard but nobody in frame — inviting over",
+            }
+        )
+        state["last_activity"] = now
+        lang = detected or state["language"]
+        text = agent.phrase("come_over", {}, lang)
+        return Reply(
+            session_id=req.session_id,
+            text=text,
+            audio_b64=_speak(text, lang),
+            language=lang,
+            actions=actions,
+            user_text=user_text,
+            attention="idle",
+        )
+
     # Arc answers in the language the person actually spoke (German default
-    # stands until someone speaks English). Only for turns it responds to —
-    # overheard chatter never flips the language.
+    # stands until someone speaks English or Farsi). Only for turns it responds
+    # to — overheard chatter never flips the language.
     if detected and detected != state["language"]:
         state["language"] = detected
         actions.append(
             {
                 "tool": "set_language",
                 "args": {"language": detected},
-                "summary": f"language → {detected} (heard "
-                + ("English)" if detected == "en" else "German)"),
+                "summary": f"language → {detected} (heard it spoken)",
             }
         )
 
@@ -279,7 +322,7 @@ def turn(req: TurnRequest) -> Reply:
     if _is_junk(user_text):
         return _ignored(req.session_id, state, user_text)
 
-    if spoken_lang not in ("en", "de") and lang_prob >= 0.6:
+    if spoken_lang not in ("en", "de", "fa") and lang_prob >= 0.6:
         # They spoke a language Arc doesn't have (seen live: Farsi) — the
         # transcript is unusable gibberish, so say so instead of guessing.
         actions.append(
@@ -318,6 +361,8 @@ def turn(req: TurnRequest) -> Reply:
     state["rejected"] = sess.rejected
     if kind == "ask_name":
         state["pending"] = "name"
+    elif kind == "played_need_side":
+        state["pending"] = "joystick"
     elif kind not in ("unclear", "context"):
         # An unclear/side reply doesn't withdraw the question Arc just asked
         # ("what's your name?") — the person can still answer it next.
@@ -327,6 +372,22 @@ def turn(req: TurnRequest) -> Reply:
         state["language"] = sess.new_language
     if kind == "played":
         # Game's on — stop reacting to gameplay chatter until "Hey Arc".
+        state["attention"] = "idle"
+    elif (
+        state["running_game"]
+        and state["pending"] is None
+        and kind
+        not in (
+            "unclear",
+            "stopped",
+            "recommendation",
+            "games_list",
+        )
+    ):
+        # Mid-game, Arc handles the woken request and then goes right back to
+        # ignoring gameplay chatter — the next request needs "Hey Arc" again.
+        # It stays engaged only while a question is open (pending, unclear) or
+        # while they're actively browsing for a different game.
         state["attention"] = "idle"
     if kind == "profile_created":
         # The camera "learns" the new face: the guest is now a known person.

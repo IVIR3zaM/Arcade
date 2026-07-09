@@ -73,7 +73,7 @@ _INTENT_SCHEMA = {
         "start": {"type": "string"},
         "end": {"type": "string"},
         "on": {"type": "boolean"},
-        "language": {"type": "string", "enum": ["en", "de"]},
+        "language": {"type": "string", "enum": ["en", "de", "fa"]},
     },
     "required": ["intent"],
 }
@@ -134,6 +134,8 @@ _INTENT_EXAMPLES = (
     '"speak English please" -> {"intent":"switch_language","language":"en"}\n'
     '"can you speak any english?" -> {"intent":"switch_language","language":"en"}\n'
     '"sprich Deutsch" -> {"intent":"switch_language","language":"de"}\n'
+    '"بازی پونگ رو بذار" -> {"intent":"play_game","title":"Pong"}\n'
+    '"چه بازی‌هایی داری؟" -> {"intent":"list_games"}\n'
     '"what time is it?" -> {"intent":"get_context"}\n'
     '"bye" -> {"intent":"goodbye"}\n'
     '"tschüss" -> {"intent":"goodbye"}'
@@ -145,7 +147,7 @@ def classify_intent(user_text: str, present: list[str], chat=_chat) -> dict:
     titles = ", ".join(g.title for g in GAMES)
     system = (
         "You label what a person at an arcade wants, as JSON only (no prose). "
-        "The person may speak English or German. "
+        "The person may speak English, German, or Persian (Farsi). "
         f"Intents: {', '.join(_INTENT_NAMES)}. Known games: {titles}."
     )
     user = (
@@ -256,6 +258,8 @@ _CANCEL_WORDS = {
     "vergiss es",
     "lass es",
     "doch nicht",
+    "نه",
+    "نه ممنون",
 }
 
 
@@ -278,6 +282,8 @@ _GOODBYES = (
     "bis dann",
     "auf wiedersehen",
     "mach's gut",
+    "خداحافظ",
+    "بای",
 )
 
 
@@ -293,15 +299,12 @@ def is_goodbye(text: str) -> bool:
 # hallucinated "Ich kann kein Englisch sprechen". A language word plus any
 # speak-ish word is unambiguous — no model needed.
 _LANG_WORDS = {
-    "en": ("english", "englisch"),
-    "de": ("german", "deutsch"),
-    # Any other language → "other": Arc must SAY it only speaks EN/DE. Left to
-    # the model, the schema forces en|de and it happily "switches" to German.
+    "en": ("english", "englisch", "انگلیسی"),
+    "de": ("german", "deutsch", "آلمانی"),
+    "fa": ("persian", "persisch", "farsi", "فارسی"),  # experimental third language
+    # Any other language → "other": Arc must SAY what it can speak. Left to the
+    # model, the schema forces a supported code and it "switches" wrongly.
     "other": (
-        "persian",
-        "persisch",
-        "farsi",
-        "فارسی",
         "french",
         "französisch",
         "spanish",
@@ -373,12 +376,18 @@ def language_request(text: str) -> str | None:
 _ACCEPTANCES = (
     "yes",
     "yes please",
+    "yes it is",
+    "yes do it",
+    "that's it",
     "yeah",
     "yep",
     "sure",
     "ok",
     "okay",
     "sounds good",
+    "بله",
+    "آره",
+    "باشه",
     "let's go",
     "let's go for that",
     "let's do it",
@@ -444,15 +453,22 @@ _SIDE_WORDS = {
 _JOYSTICK_WORDS = {"joystick", "joysticks", "controller", "stick"}
 
 
+def side_word(text: str) -> str | None:
+    """'left'/'right' if the utterance names a side at all (answering "which
+    joystick?" is often just "the right one")."""
+    tokens = set(re.sub(r"[^\w\s]", " ", text.lower()).split())
+    for side, words in _SIDE_WORDS.items():
+        if tokens & set(words):
+            return side
+    return None
+
+
 def joystick_side(text: str) -> str | None:
     """'left'/'right' if the utterance names a joystick side, else None."""
     tokens = set(re.sub(r"[^\w\s]", " ", text.lower()).split())
     if not tokens & _JOYSTICK_WORDS:
         return None
-    for side, words in _SIDE_WORDS.items():
-        if tokens & set(words):
-            return side
-    return None
+    return side_word(text)
 
 
 def _mentions_game_title(text: str) -> bool:
@@ -563,14 +579,16 @@ def execute_intent(
         res = do("launch_game", title=title)
         if "error" in res:
             return "game_not_found", res, actions
-        joystick = do(
-            "assign_joystick",
-            player=_speaker(session),
-            side=intent.get("side") or "",
-        )
         # They picked one — the browse context is over.
         session.last_suggested = None
         session.rejected = []
+        side = intent.get("side")
+        if not side and len(session.present) == 1:
+            # Don't silently assume a joystick — the game starts and Arc asks
+            # which one they want (the app keeps listening for the answer).
+            # With two players the sides stay positional (one each).
+            return "played_need_side", res, actions
+        joystick = do("assign_joystick", player=_speaker(session), side=side)
         return "played", {**res, "joystick": joystick.get("joystick")}, actions
 
     def recommend(genre: str = "", query: str = "") -> tuple[str, dict, list[dict]]:
@@ -613,7 +631,7 @@ def execute_intent(
             player=_speaker(session),
             side=intent.get("side") or "",
         )
-        return "joystick_set", res, actions
+        return "joystick_set", {**res, "in_game": bool(session.running_game)}, actions
 
     if kind == "list_games":
         return "games_list", do("list_games"), actions
@@ -676,10 +694,10 @@ def execute_intent(
     if kind == "switch_language":
         lang = intent.get("language")
         if lang == "other":
-            # Asked for a language Arc doesn't have (Farsi, French, ...) — say
-            # so honestly instead of "switching" to one of the two it does have.
+            # Asked for a language Arc doesn't have (French, ...) — say so
+            # honestly instead of "switching" to one it does have.
             return "language_unsupported", {}, actions
-        if lang not in ("en", "de"):
+        if lang not in ("en", "de", "fa"):
             return "unclear", {}, actions
         speaker = _speaker(session)
         res = do(
@@ -701,17 +719,41 @@ def execute_intent(
 
 # Outcomes we answer without any model call (fast, and avoids odd 3B phrasings).
 _CANNED = {
-    "goodbye": {"en": "Have fun — see you next time!", "de": "Viel Spaß — bis bald!"},
+    "goodbye": {
+        "en": "Have fun — see you next time!",
+        "de": "Viel Spaß — bis bald!",
+        "fa": "خوش بگذره — تا دفعه بعد!",
+    },
     "unclear": {
         "en": "Sorry, I didn't catch that — could you say it again?",
         "de": "Entschuldigung, das habe ich nicht verstanden — nochmal bitte?",
+        "fa": "ببخشید، متوجه نشدم — میشه دوباره بگی؟",
     },
-    "wake_ack": {"en": "Yes? I'm listening.", "de": "Ja? Ich höre."},
-    "ask_name": {"en": "Gladly! What's your name?", "de": "Gerne! Wie heißt du denn?"},
-    "cancelled": {"en": "Okay, no problem.", "de": "Okay, kein Problem."},
+    "wake_ack": {
+        "en": "Yes? I'm listening.",
+        "de": "Ja? Ich höre.",
+        "fa": "بله؟ گوش می‌کنم.",
+    },
+    "ask_name": {
+        "en": "Gladly! What's your name?",
+        "de": "Gerne! Wie heißt du denn?",
+        "fa": "با کمال میل! اسمت چیه؟",
+    },
+    "cancelled": {
+        "en": "Okay, no problem.",
+        "de": "Okay, kein Problem.",
+        "fa": "باشه، مشکلی نیست.",
+    },
     "language_unsupported": {
-        "en": "Sorry — I can only speak English and German.",
-        "de": "Entschuldigung — ich kann nur Deutsch und Englisch sprechen.",
+        "en": "Sorry — I can speak English, German, and a bit of Farsi.",
+        "de": "Entschuldigung — ich spreche Englisch, Deutsch und etwas Farsi.",
+        "fa": "متأسفم — فقط انگلیسی، آلمانی و کمی فارسی بلدم.",
+    },
+    # Someone said "Hey Arc" but the camera sees nobody at the cabinet.
+    "come_over": {
+        "en": "I can hear you, but I can't see anyone at the cabinet — come on over if you want to play!",
+        "de": "Ich höre dich, aber ich sehe niemanden am Automaten — komm vorbei, wenn du spielen willst!",
+        "fa": "صداتو می‌شنوم ولی کسی رو جلوی دستگاه نمی‌بینم — اگه می‌خوای بازی کنی بیا جلو!",
     },
 }
 
@@ -724,6 +766,18 @@ def _render(kind: str, data: dict, language: str) -> str | None:
     Templates keep the common turns at ONE model call (the intent) — the phrasing
     LLM call only remains for open-ended outcomes (greeting, context questions).
     """
+    if kind == "language_set":
+        return {
+            "de": "Alles klar — ab jetzt Deutsch!",
+            "en": "Alright — English it is!",
+            "fa": "باشه — از حالا فارسی حرف می‌زنم!",
+        }.get(data.get("language"), "Alright!")
+
+    if language == "fa":
+        # Experimental: no hand-written Farsi templates — let the model phrase
+        # every outcome from the facts. Slower, but that's what we're testing.
+        return None
+
     de = language == "de"
     err = data.get("error")
 
@@ -737,6 +791,17 @@ def _render(kind: str, data: dict, language: str) -> str | None:
         return (
             f"Starting {data['launched']} — grab the {joy} joystick. "
             "Have fun! Say 'Hey Arc' if you need me."
+        )
+
+    if kind == "played_need_side":
+        if de:
+            return (
+                f"{data['launched']} startet! Welchen Joystick möchtest du — "
+                "den linken oder den rechten?"
+            )
+        return (
+            f"Starting {data['launched']}! Which joystick would you like — "
+            "left or right?"
         )
 
     if kind == "game_not_found":
@@ -830,9 +895,17 @@ def _render(kind: str, data: dict, language: str) -> str | None:
             )
         joy = data.get("joystick", "left")
         who = data.get("player", "")
+        # Mid-game Arc goes back to ignoring chatter right after this reply.
+        hint = ""
+        if data.get("in_game"):
+            hint = (
+                " Viel Spaß weiter — sag 'Hey Arc', wenn du mich brauchst."
+                if de
+                else " Enjoy — say 'Hey Arc' if you need me again."
+            )
         if de:
-            return f"Alles klar, {who} — du hast jetzt den {_JOY_DE.get(joy, joy)} Joystick."
-        return f"Done, {who} — you've got the {joy} joystick now."
+            return f"Alles klar, {who} — du hast jetzt den {_JOY_DE.get(joy, joy)} Joystick.{hint}"
+        return f"Done, {who} — you've got the {joy} joystick now.{hint}"
 
     if kind == "monitor_set":
         if data.get("monitor_on"):
@@ -845,13 +918,6 @@ def _render(kind: str, data: dict, language: str) -> str | None:
             "Okay, ich schalte den Bildschirm aus."
             if de
             else "Okay, turning the screen off."
-        )
-
-    if kind == "language_set":
-        return (
-            "Alles klar — ab jetzt Deutsch!"
-            if data.get("language") == "de"
-            else "Alright — English it is!"
         )
 
     if kind == "error":
@@ -874,14 +940,26 @@ _PHRASE_INSTRUCTION = {
 }
 
 
+_LANG_NAMES = {"en": "English", "de": "German", "fa": "Persian (Farsi)"}
+
+
+def _canned(kind: str, language: str) -> str:
+    lines = _CANNED[kind]
+    return lines.get(language) or lines["en"]
+
+
 def phrase(kind: str, data: dict, language: str, chat=_chat) -> str:
-    """One spoken line for an outcome: canned → template → model, in that order."""
+    """One spoken line for an outcome: canned → template → model, in that order.
+
+    Farsi is experimental: only the canned lines are hand-translated; everything
+    else falls through to the model with "speak Persian" — that's the test.
+    """
     if kind in _CANNED:
-        return _CANNED[kind]["de" if language == "de" else "en"]
+        return _canned(kind, language)
     rendered = _render(kind, data, language)
     if rendered is not None:
         return rendered
-    lang = "German" if language == "de" else "English"
+    lang = _LANG_NAMES.get(language, "English")
     instruction = _PHRASE_INSTRUCTION.get(kind, "Reply briefly.")
     system = f"{PERSONA} Speak in {lang}. Use only the facts given; never invent any."
     user = (
@@ -889,7 +967,7 @@ def phrase(kind: str, data: dict, language: str, chat=_chat) -> str:
         "Say your short spoken reply now."
     )
     text = chat(system, user)
-    return text or _CANNED["unclear"]["de" if language == "de" else "en"]
+    return text or _canned("unclear", language)
 
 
 # --- orchestration ----------------------------------------------------------
@@ -950,6 +1028,19 @@ def handle_turn(
         if name:
             intent = {"intent": "create_profile", "name": name}
             note = " (name from reply)"
+    if pending == "joystick" and intent is None:
+        # We just asked "which joystick?" — "the right one" is a full answer.
+        answer = side_word(user_text)
+        if answer:
+            intent = {"intent": "joystick", "side": answer}
+            note = " (side from reply)"
+        elif is_cancel(user_text):
+            routing = {
+                "tool": "route",
+                "args": {"heard": user_text},
+                "summary": "intent=cancelled (pending joystick)",
+            }
+            return phrase("cancelled", {}, language, chat=chat), [routing], "cancelled"
     if intent is None and is_goodbye(user_text):
         intent = {"intent": "goodbye"}
         note = " (matched in code)"
@@ -981,6 +1072,15 @@ def handle_turn(
             # de. Code re-reads the utterance; no supported language named →
             # Arc states the two it has.
             intent["language"] = language_request(user_text) or "other"
+    if intent.get("intent") in ("recommend", "list_games"):
+        # Saying a game's full title IS choosing it, even when the model labels
+        # the turn as browsing ("Let's go for Super Mario World" came back as
+        # recommend(query="Mario") and Arc re-offered instead of launching).
+        low = user_text.lower()
+        named = next((g.title for g in GAMES if g.title.lower() in low), None)
+        if named:
+            intent = {"intent": "play_game", "title": named}
+            note = " (named the game)"
     if side and "side" not in intent:
         # "Play Super Mario World on the right" — carry the side into launch.
         intent["side"] = side

@@ -67,8 +67,21 @@ minutes with no game running (the CLI polls `/tick`, so you see it happen).
 **German is the default language** for guests; known people get their saved
 language. Whisper **auto-detects the language of every utterance** (forcing the
 session language would mangle English speech into German gibberish), so Arc
-simply answers in whichever of EN/DE you speak — and an explicit "speak
-English" / "sprich Deutsch" still switches and persists it on your profile.
+simply answers in whichever supported language you speak — and an explicit
+"speak English" / "sprich Deutsch" still switches and persists it on your
+profile. **Farsi is enabled as an experimental third language**: the wake word,
+goodbye/yes/no words, and a handful of canned lines are hand-translated, and
+every other reply is phrased by the LLM in Persian (Piper `fa_IR-amir` voice) —
+it exists purely to test how far a small local model stretches. Any *other*
+language gets an honest "I can speak English, German, and a bit of Farsi."
+
+Launching a game **asks which joystick you want** (one player; two players get
+one each automatically), and the answer — "the right one" — is understood
+without the model, including whisper's "Ride"/"Wright" mishearings. **Mid-game,
+Arc answers one woken request and immediately goes back to ignoring gameplay
+chatter** — every new request needs "Hey Arc" again; it only stays engaged
+while a question of its own is open (which joystick? what's your name?) or
+while you're browsing for a different game.
 
 **The actions (`brain/tools.py`)** — every one is printed in the CLI as it runs:
 
@@ -175,6 +188,9 @@ in the `pi_data` volume; `docker compose down -v` wipes them for a clean slate.
   *"erstell mir ein Profil"* — Arc asks for your name, then remembers you.
 - **reza-admin** — Reza (admin): try "turn off the mic and camera every night
   from 8pm to 9am".
+- **nobody-home** — nobody in frame: the cabinet sits dark and silent. Say
+  "Hey Arc" from across the room — it hears you, can't see you, and invites
+  you over to play.
 
 Things to try by voice: *"let's play Pong"*, then chat normally (ignored), then
 *"Hey Arc, stop the game"*; *"what can I play?"*; *"remember I only play after

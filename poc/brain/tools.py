@@ -254,8 +254,8 @@ def set_monitor(session: Session, on: bool) -> dict:
 
 def set_language(session: Session, language: str, name: str = "") -> dict:
     """Switch the conversation language, persisting it on the speaker's profile."""
-    if language not in ("en", "de"):
-        return {"error": f"unsupported language {language!r} (en or de)"}
+    if language not in ("en", "de", "fa"):
+        return {"error": f"unsupported language {language!r} (en, de, or fa)"}
     session.new_language = language
     persisted = bool(name) and store.set_language(session.conn, name, language)
     return {"language": language, "persisted_for": name if persisted else None}

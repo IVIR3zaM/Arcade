@@ -43,14 +43,49 @@ def test_classify_intent_falls_back_on_bad_json():
 # --- execute_intent (pure, no model) ---------------------------------------
 
 
-def test_execute_play_game_launches_and_assigns_joystick():
+def test_execute_play_game_with_side_launches_and_assigns_joystick():
     kind, data, actions = agent.execute_intent(
-        _session(["Leo"]), {"intent": "play_game", "title": "Point"}
+        _session(["Leo"]), {"intent": "play_game", "title": "Point", "side": "left"}
     )
     assert kind == "played"
     assert data["launched"] == "Pong"  # fuzzy-corrected in code
     assert data["joystick"] == "left"
     assert [a["tool"] for a in actions] == ["launch_game", "assign_joystick"]
+
+
+def test_execute_play_game_without_side_asks_which_joystick():
+    # Single player, no side spoken → the game starts but Arc ASKS instead of
+    # silently assuming "left".
+    sess = _session(["Leo"])
+    kind, data, actions = agent.execute_intent(
+        sess, {"intent": "play_game", "title": "Pong"}
+    )
+    assert kind == "played_need_side"
+    assert sess.running_game == "Pong"
+    assert [a["tool"] for a in actions] == ["launch_game"]  # no assignment yet
+    text = agent.phrase("played_need_side", data, "en", chat=None)
+    assert "left or right" in text
+
+
+def test_two_players_get_positional_joysticks_without_asking():
+    kind, data, _actions = agent.execute_intent(
+        _session(["Leo", "Mia"]), {"intent": "play_game", "title": "Pong"}
+    )
+    assert kind == "played"
+    assert data["joystick"] == "left"  # the speaker (Leo) is first in line
+
+
+def test_pending_joystick_answer_assigns_the_side():
+    def boom(system, user, as_json=False):
+        raise AssertionError("a side answer must not need the model")
+
+    sess = _session(["Leo"])
+    sess.running_game = "Pong"
+    text, _actions, kind = agent.handle_turn(
+        sess, "The right one, please.", "en", chat=boom, pending="joystick"
+    )
+    assert kind == "joystick_set"
+    assert "right" in text
 
 
 def test_execute_privacy_is_admin_gated_in_code():
@@ -99,9 +134,9 @@ def test_handle_turn_routes_then_uses_template_one_model_call():
 
     sess = _session(["Leo"])
     text, actions, kind = agent.handle_turn(sess, "play pong", "en", chat=chat)
-    assert "Pong" in text and "left" in text  # deterministic template, no 2nd call
+    assert "Pong" in text and "left or right" in text  # template asks for a side
     assert calls == [True]  # ONE model call per typical turn now
-    assert kind == "played"
+    assert kind == "played_need_side"
     assert actions[0]["tool"] == "route"
     assert sess.running_game == "Pong"
 
@@ -197,17 +232,26 @@ def test_recommend_honors_genre_and_rejections():
     assert "Mario" in data["recommendation"]
 
 
-def test_asking_for_farsi_says_unsupported_not_german():
+def test_asking_for_farsi_switches_asking_for_french_does_not():
     def boom(system, user, as_json=False):
         raise AssertionError("must not need the model")
 
+    # Farsi is enabled (experimental) — switching works.
     sess = _session(["unknown"])
-    text, _actions, kind = agent.handle_turn(
+    _text, _actions, kind = agent.handle_turn(
         sess, "Can you speak Farsi?", "en", chat=boom
     )
+    assert kind == "language_set"
+    assert sess.new_language == "fa"
+
+    # A language Arc doesn't have gets an honest refusal, not a wrong switch.
+    sess2 = _session(["unknown"])
+    text, _actions, kind = agent.handle_turn(
+        sess2, "Can you speak French?", "en", chat=boom
+    )
     assert kind == "language_unsupported"
-    assert "English and German" in text
-    assert sess.new_language is None  # nothing switched
+    assert "English, German" in text
+    assert sess2.new_language is None
 
 
 def test_model_switch_language_is_revalidated_against_the_utterance():
@@ -233,7 +277,7 @@ def test_accepting_the_suggestion_launches_it():
     _text, _actions, kind = agent.handle_turn(
         sess, "Let's go for that.", "en", chat=boom
     )
-    assert kind == "played"
+    assert kind == "played_need_side"  # launched; Arc asks which joystick
     assert sess.running_game == "Super Mario World"
 
 
@@ -244,7 +288,7 @@ def test_recommend_query_naming_a_full_title_launches_it():
     kind, data, _ = agent.execute_intent(
         sess, {"intent": "recommend", "query": "Super Mario World"}
     )
-    assert kind == "played"
+    assert kind == "played_need_side"  # launched; Arc asks which joystick
     assert data["launched"] == "Super Mario World"
 
     # A vague keyword ("Mario") still browses.
@@ -282,6 +326,27 @@ def test_play_game_with_spoken_side_overrides_position():
     assert kind == "played"
     joystick = next(a for a in actions if a["tool"] == "assign_joystick")
     assert joystick["args"]["side"] == "right"
+
+
+def test_naming_the_full_title_mid_browse_launches_it():
+    # Model labels "Let's go for Super Mario World" as recommend(query="Mario") —
+    # the full title in the utterance overrides and launches.
+    def chat(system, user, as_json=False):
+        return json.dumps({"intent": "recommend", "query": "Mario"})
+
+    sess = _session(["unknown"])
+    _text, actions, kind = agent.handle_turn(
+        sess, "Let's go for Super Mario World.", "en", chat=chat
+    )
+    assert kind == "played_need_side"
+    assert sess.running_game == "Super Mario World"
+    assert "(named the game)" in actions[0]["summary"]
+
+
+def test_come_over_line_exists_in_all_three_languages():
+    for lang in ("en", "de", "fa"):
+        line = agent.phrase("come_over", {}, lang, chat=None)
+        assert line  # canned — no model involved
 
 
 def test_misheard_close_request_stops_the_running_game():
