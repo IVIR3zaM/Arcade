@@ -197,6 +197,109 @@ def test_recommend_honors_genre_and_rejections():
     assert "Mario" in data["recommendation"]
 
 
+def test_asking_for_farsi_says_unsupported_not_german():
+    def boom(system, user, as_json=False):
+        raise AssertionError("must not need the model")
+
+    sess = _session(["unknown"])
+    text, _actions, kind = agent.handle_turn(
+        sess, "Can you speak Farsi?", "en", chat=boom
+    )
+    assert kind == "language_unsupported"
+    assert "English and German" in text
+    assert sess.new_language is None  # nothing switched
+
+
+def test_model_switch_language_is_revalidated_against_the_utterance():
+    # Whisper heard "Can you speak Farsi?" as "for us"; the model's schema can
+    # only answer en|de and picked de. Code must not switch on that.
+    def chat(system, user, as_json=False):
+        return json.dumps({"intent": "switch_language", "language": "de"})
+
+    sess = _session(["unknown"])
+    _text, _actions, kind = agent.handle_turn(
+        sess, "Can you speak for us?", "en", chat=chat
+    )
+    assert kind == "language_unsupported"
+    assert sess.new_language is None
+
+
+def test_accepting_the_suggestion_launches_it():
+    def boom(system, user, as_json=False):
+        raise AssertionError("acceptance must not need the model")
+
+    sess = _session(["unknown"])
+    sess.last_suggested = "Super Mario World"
+    _text, _actions, kind = agent.handle_turn(
+        sess, "Let's go for that.", "en", chat=boom
+    )
+    assert kind == "played"
+    assert sess.running_game == "Super Mario World"
+
+
+def test_recommend_query_naming_a_full_title_launches_it():
+    # "I like Super Mario World, let's go for that" comes back from the model as
+    # recommend(query="Super Mario World") — that's a choice, not a browse.
+    sess = _session(["unknown"])
+    kind, data, _ = agent.execute_intent(
+        sess, {"intent": "recommend", "query": "Super Mario World"}
+    )
+    assert kind == "played"
+    assert data["launched"] == "Super Mario World"
+
+    # A vague keyword ("Mario") still browses.
+    sess2 = _session(["unknown"])
+    kind, _data, _ = agent.execute_intent(
+        sess2, {"intent": "recommend", "query": "Mario"}
+    )
+    assert kind == "recommendation"
+
+
+def test_joystick_request_is_matched_in_code():
+    def boom(system, user, as_json=False):
+        raise AssertionError("a joystick request must not need the model")
+
+    sess = _session(["unknown"])
+    sess.running_game = "Super Mario World"
+    text, _actions, kind = agent.handle_turn(
+        sess,
+        "I wanna use Ride joystick.",
+        "en",
+        chat=boom,  # whisper's "right"
+    )
+    assert kind == "joystick_set"
+    assert "right" in text
+
+
+def test_play_game_with_spoken_side_overrides_position():
+    def chat(system, user, as_json=False):
+        return json.dumps({"intent": "play_game", "title": "Super Mario World"})
+
+    sess = _session(["unknown"])
+    _text, actions, kind = agent.handle_turn(
+        sess, "Play Super Mario World on the right joystick.", "en", chat=chat
+    )
+    assert kind == "played"
+    joystick = next(a for a in actions if a["tool"] == "assign_joystick")
+    assert joystick["args"]["side"] == "right"
+
+
+def test_misheard_close_request_stops_the_running_game():
+    def boom(system, user, as_json=False):
+        raise AssertionError("a stop request must not need the model")
+
+    sess = _session(["unknown"])
+    sess.running_game = "Super Mario World"
+    _text, _actions, kind = agent.handle_turn(
+        sess,
+        "Kilo's the game.",
+        "en",
+        chat=boom,  # whisper's "Close the game"
+    )
+    assert kind == "stopped"
+    assert sess.running_game is None
+
+
 def test_no_game_running_plus_rejection_suggests_something_else():
     # "I said no Pong" gets misrouted to stop_game; with nothing running and a
     # live suggestion it's a rejection → recommend another game, not an error.

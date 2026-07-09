@@ -186,12 +186,15 @@ def recommend_game(
     }
 
 
-def assign_joystick(session: Session, player: str) -> dict:
+def assign_joystick(session: Session, player: str, side: str = "") -> dict:
+    """Joystick for a player: their spoken preference ("the right one") wins,
+    otherwise deterministic by position at the cabinet."""
     names = session.display_present()
     matched = _fuzzy(player, names)
     if matched is None:
         return {"error": "no such person is present", "present": names}
-    side = "left" if names.index(matched) == 0 else "right"
+    if side not in ("left", "right"):
+        side = "left" if names.index(matched) == 0 else "right"
     return {"player": matched, "joystick": side}
 
 

@@ -279,6 +279,28 @@ def turn(req: TurnRequest) -> Reply:
     if _is_junk(user_text):
         return _ignored(req.session_id, state, user_text)
 
+    if spoken_lang not in ("en", "de") and lang_prob >= 0.6:
+        # They spoke a language Arc doesn't have (seen live: Farsi) — the
+        # transcript is unusable gibberish, so say so instead of guessing.
+        actions.append(
+            {
+                "tool": "route",
+                "args": {"heard": user_text},
+                "summary": f"unsupported spoken language ({spoken_lang})",
+            }
+        )
+        state["last_activity"] = now
+        text = agent.phrase("language_unsupported", {}, state["language"])
+        return Reply(
+            session_id=req.session_id,
+            text=text,
+            audio_b64=_speak(text, state["language"]),
+            language=state["language"],
+            actions=actions,
+            user_text=user_text,
+            attention=state["attention"],
+        )
+
     sess = Session(
         conn=store.connect(),
         present=state["present"],

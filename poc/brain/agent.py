@@ -295,7 +295,38 @@ def is_goodbye(text: str) -> bool:
 _LANG_WORDS = {
     "en": ("english", "englisch"),
     "de": ("german", "deutsch"),
-    "fa": ("persian", "persisch", "farsi", "فارسی"),
+    # Any other language → "other": Arc must SAY it only speaks EN/DE. Left to
+    # the model, the schema forces en|de and it happily "switches" to German.
+    "other": (
+        "persian",
+        "persisch",
+        "farsi",
+        "فارسی",
+        "french",
+        "französisch",
+        "spanish",
+        "spanisch",
+        "italian",
+        "italienisch",
+        "turkish",
+        "türkisch",
+        "arabic",
+        "arabisch",
+        "russian",
+        "russisch",
+        "chinese",
+        "chinesisch",
+        "japanese",
+        "japanisch",
+        "korean",
+        "koreanisch",
+        "dutch",
+        "polish",
+        "polnisch",
+        "portuguese",
+        "hindi",
+        "ukrainian",
+    ),
 }
 _LANG_HINTS = {
     "speak",
@@ -335,6 +366,102 @@ def language_request(text: str) -> str | None:
     if hit and (tokens & _LANG_HINTS or len(tokens) <= 2):
         return hit
     return None
+
+
+# Accepting the game Arc just offered ("How about X?" — "Let's go for that!")
+# must LAUNCH it, not re-recommend it. Matched in code, fuzzily.
+_ACCEPTANCES = (
+    "yes",
+    "yes please",
+    "yeah",
+    "yep",
+    "sure",
+    "ok",
+    "okay",
+    "sounds good",
+    "let's go",
+    "let's go for that",
+    "let's do it",
+    "let's play it",
+    "that one",
+    "go for that",
+    "perfect",
+    "great",
+    "ja",
+    "ja bitte",
+    "ja gerne",
+    "gerne",
+    "genau",
+    "perfekt",
+    "klingt gut",
+    "das nehme ich",
+    "machen wir",
+    "los",
+    "los geht's",
+)
+
+
+def is_acceptance(text: str) -> bool:
+    t = re.sub(r"[^\w\s']", "", text.lower()).strip()
+    if not t or len(t.split()) > 5:
+        return False
+    return bool(difflib.get_close_matches(t, _ACCEPTANCES, n=1, cutoff=0.8))
+
+
+# "Close the game" arrives from whisper as "Kilo's the game" — while a game is
+# running, a stop request is matched fuzzily in code, like goodbye.
+_STOP_PHRASES = (
+    "close the game",
+    "close this game",
+    "close it",
+    "stop the game",
+    "stop this game",
+    "stop it",
+    "quit the game",
+    "end the game",
+    "i'm done",
+    "beende das spiel",
+    "stopp das spiel",
+    "schließ das spiel",
+    "mach das spiel aus",
+    "spiel beenden",
+    "ich bin fertig",
+)
+
+
+def is_stop_request(text: str) -> bool:
+    t = re.sub(r"[^\w\s']", "", text.lower()).strip()
+    if not t or len(t.split()) > 5:
+        return False
+    return bool(difflib.get_close_matches(t, _STOP_PHRASES, n=1, cutoff=0.72))
+
+
+# Joystick sides, including whisper's favorite mishearings ("Ride joystick").
+_SIDE_WORDS = {
+    "right": ("right", "ride", "wright", "rite", "rechts", "rechten", "rechte"),
+    "left": ("left", "links", "linken", "linke"),
+}
+_JOYSTICK_WORDS = {"joystick", "joysticks", "controller", "stick"}
+
+
+def joystick_side(text: str) -> str | None:
+    """'left'/'right' if the utterance names a joystick side, else None."""
+    tokens = set(re.sub(r"[^\w\s]", " ", text.lower()).split())
+    if not tokens & _JOYSTICK_WORDS:
+        return None
+    for side, words in _SIDE_WORDS.items():
+        if tokens & set(words):
+            return side
+    return None
+
+
+def _mentions_game_title(text: str) -> bool:
+    low = text.lower()
+    return any(
+        g.title.lower() in low
+        or any(w in low for w in g.title.lower().split() if len(w) > 4)
+        for g in GAMES
+    )
 
 
 # For a create_profile intent, the name is extracted by CODE from the utterance,
@@ -432,7 +559,35 @@ def execute_intent(
         )
         return result
 
+    def play(title: str) -> tuple[str, dict, list[dict]]:
+        res = do("launch_game", title=title)
+        if "error" in res:
+            return "game_not_found", res, actions
+        joystick = do(
+            "assign_joystick",
+            player=_speaker(session),
+            side=intent.get("side") or "",
+        )
+        # They picked one — the browse context is over.
+        session.last_suggested = None
+        session.rejected = []
+        return "played", {**res, "joystick": joystick.get("joystick")}, actions
+
     def recommend(genre: str = "", query: str = "") -> tuple[str, dict, list[dict]]:
+        # Naming a specific game IS the choice — launch it, don't re-offer it
+        # ("I like Super Mario World, let's go for that" came back as
+        # recommend(query="Super Mario World") and Arc replied "How about
+        # Super Mario World?").
+        if query:
+            for candidate in [session.last_suggested] + [g.title for g in GAMES]:
+                if (
+                    candidate
+                    and difflib.SequenceMatcher(
+                        None, query.lower(), candidate.lower()
+                    ).ratio()
+                    >= 0.8
+                ):
+                    return play(candidate)
         # Asking again means the last offer was declined — never repeat it.
         if session.last_suggested and session.last_suggested not in session.rejected:
             session.rejected.append(session.last_suggested)
@@ -443,14 +598,7 @@ def execute_intent(
         return "recommendation", res, actions
 
     if kind == "play_game":
-        res = do("launch_game", title=intent.get("title", ""))
-        if "error" in res:
-            return "game_not_found", res, actions
-        joystick = do("assign_joystick", player=_speaker(session))
-        # They picked one — the browse context is over.
-        session.last_suggested = None
-        session.rejected = []
-        return "played", {**res, "joystick": joystick.get("joystick")}, actions
+        return play(intent.get("title", ""))
 
     if kind == "stop_game":
         if session.running_game is None and session.last_suggested:
@@ -458,6 +606,14 @@ def execute_intent(
             # running it's a rejection of the last offer — suggest something else.
             return recommend()
         return "stopped", do("close_game"), actions
+
+    if kind == "joystick":
+        res = do(
+            "assign_joystick",
+            player=_speaker(session),
+            side=intent.get("side") or "",
+        )
+        return "joystick_set", res, actions
 
     if kind == "list_games":
         return "games_list", do("list_games"), actions
@@ -519,7 +675,11 @@ def execute_intent(
 
     if kind == "switch_language":
         lang = intent.get("language")
-        if lang not in ("en", "de", "fa"):
+        if lang == "other":
+            # Asked for a language Arc doesn't have (Farsi, French, ...) — say
+            # so honestly instead of "switching" to one of the two it does have.
+            return "language_unsupported", {}, actions
+        if lang not in ("en", "de"):
             return "unclear", {}, actions
         speaker = _speaker(session)
         res = do(
@@ -549,6 +709,10 @@ _CANNED = {
     "wake_ack": {"en": "Yes? I'm listening.", "de": "Ja? Ich höre."},
     "ask_name": {"en": "Gladly! What's your name?", "de": "Gerne! Wie heißt du denn?"},
     "cancelled": {"en": "Okay, no problem.", "de": "Okay, kein Problem."},
+    "language_unsupported": {
+        "en": "Sorry — I can only speak English and German.",
+        "de": "Entschuldigung — ich kann nur Deutsch und Englisch sprechen.",
+    },
 }
 
 _JOY_DE = {"left": "linken", "right": "rechten"}
@@ -656,6 +820,19 @@ def _render(kind: str, data: dict, language: str) -> str | None:
         if de:
             return "Entschuldigung — das darf nur ein Admin."
         return "Sorry — only an admin can do that."
+
+    if kind == "joystick_set":
+        if err:
+            return (
+                "Entschuldigung, das hat nicht geklappt."
+                if de
+                else "Sorry, that didn't work."
+            )
+        joy = data.get("joystick", "left")
+        who = data.get("player", "")
+        if de:
+            return f"Alles klar, {who} — du hast jetzt den {_JOY_DE.get(joy, joy)} Joystick."
+        return f"Done, {who} — you've got the {joy} joystick now."
 
     if kind == "monitor_set":
         if data.get("monitor_on"):
@@ -779,11 +956,34 @@ def handle_turn(
     if intent is None and (lang := language_request(user_text)):
         intent = {"intent": "switch_language", "language": lang}
         note = " (matched in code)"
+    if intent is None and session.last_suggested and is_acceptance(user_text):
+        # "How about X?" — "Let's go for that!" means PLAY X. Left to the model
+        # this became another recommend (once even with a hallucinated query).
+        intent = {"intent": "play_game", "title": session.last_suggested}
+        note = " (accepted suggestion)"
+    if intent is None and session.running_game and is_stop_request(user_text):
+        # Whisper turns "Close the game" into "Kilo's the game" — fuzzy match.
+        intent = {"intent": "stop_game"}
+        note = " (matched in code)"
+    side = joystick_side(user_text)
+    if intent is None and side and not _mentions_game_title(user_text):
+        # Pure joystick request ("wanna use the right joystick?").
+        intent = {"intent": "joystick", "side": side}
+        note = " (matched in code)"
     if intent is None:
         intent = classify_intent(user_text, session.display_present(), chat=chat)
         if intent.get("intent") == "create_profile":
             # Never trust the model with the name — code extracts it (or asks).
             intent["name"] = name_from_utterance(user_text)
+        if intent.get("intent") == "switch_language":
+            # Never trust the model's language either: its schema can only say
+            # en|de, so "Can you speak Farsi?" (misheard: "for us") came back as
+            # de. Code re-reads the utterance; no supported language named →
+            # Arc states the two it has.
+            intent["language"] = language_request(user_text) or "other"
+    if side and "side" not in intent:
+        # "Play Super Mario World on the right" — carry the side into launch.
+        intent["side"] = side
     routing = {
         "tool": "route",
         "args": {"heard": user_text},
