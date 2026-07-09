@@ -166,6 +166,56 @@ def test_extract_name():
     assert agent.extract_name("Ich heiße Sam Miller!") == "Sam Miller"
     assert agent.extract_name("sam") == "Sam"
     assert agent.extract_name("I don't want to tell you that") is None
+    # The name leads, trailing chatter follows (seen live).
+    assert agent.extract_name("Kean, it is K.") == "Kean"
+
+
+def test_spelled_name_beats_the_heard_spelling():
+    # "My name is Kean. It is K-I-A-N." must save Kian, not Kean.
+    assert agent.spelled_name("My name is Kean. It is K-I-A-N.") == "Kian"
+    assert agent.extract_name("Kean. It is K-I-A-N.") == "Kian"
+    assert agent.name_from_utterance("My name is Kean, K-I-A-N") == "Kian"
+    assert agent.spelled_name("my name is Sam") is None  # no spelled run
+
+
+def test_recommend_honors_genre_and_rejections():
+    sess = _session(["unknown"])
+    # Greeting suggested Pong; asking for sport must NOT repeat it.
+    sess.last_suggested = "Pong"
+    kind, data, _ = agent.execute_intent(
+        sess, {"intent": "recommend", "genre": "sport"}
+    )
+    assert kind == "recommendation"
+    assert data["recommendation"] == "Track & Field"  # the other sports game
+    assert "Pong" in sess.rejected
+
+    # "something from Mario" filters by title keyword.
+    sess2 = _session(["unknown"])
+    _kind, data, _ = agent.execute_intent(
+        sess2, {"intent": "recommend", "query": "Mario"}
+    )
+    assert "Mario" in data["recommendation"]
+
+
+def test_no_game_running_plus_rejection_suggests_something_else():
+    # "I said no Pong" gets misrouted to stop_game; with nothing running and a
+    # live suggestion it's a rejection → recommend another game, not an error.
+    sess = _session(["unknown"])
+    sess.last_suggested = "Pong"
+    kind, data, _ = agent.execute_intent(sess, {"intent": "stop_game"})
+    assert kind == "recommendation"
+    assert data["recommendation"] != "Pong"
+
+
+def test_greeting_facts_do_not_include_the_raw_hint():
+    prompts = []
+
+    def chat(system, user, as_json=False):
+        prompts.append(user)
+        return "Welcome!"
+
+    agent.greet(_session(["unknown"]), "en", chat=chat)
+    assert "hint" not in prompts[0]  # the 3B echoed "[Hint]" into speech once
 
 
 def test_name_comes_from_the_utterance_not_the_model():

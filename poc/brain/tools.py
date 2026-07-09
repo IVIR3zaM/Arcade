@@ -37,6 +37,8 @@ class Session:
     running_game: str | None = None
     log: list[dict] = field(default_factory=list)  # tool calls made this session
     new_language: str | None = None  # set when the person asks to switch language
+    last_suggested: str | None = None  # the game Arc offered last ("How about X?")
+    rejected: list[str] = field(default_factory=list)  # suggestions declined this visit
 
     def display_present(self) -> list[str]:
         return ["Guest" if n == "unknown" else n for n in self.present]
@@ -126,15 +128,61 @@ def list_games(session: Session) -> dict:
     }
 
 
-def recommend_game(session: Session) -> dict:
+# German/casual genre words → the catalog's genre tags (fuzzy match handles the rest).
+_GENRE_SYNONYMS = {
+    "sport": "sports",
+    "sportspiel": "sports",
+    "sportspiele": "sports",
+    "rennen": "racing",
+    "rennspiel": "racing",
+    "rennspiele": "racing",
+    "autorennen": "racing",
+    "kampf": "fighting",
+    "kampfspiel": "fighting",
+    "denkspiel": "puzzle",
+    "knobeln": "puzzle",
+    "ballerspiel": "shooter",
+    "jump n run": "platformer",
+    "jump and run": "platformer",
+}
+
+
+def recommend_game(
+    session: Session, genre: str = "", query: str = "", exclude: list | None = None
+) -> dict:
+    """Suggest a game, honoring a genre ("something in sport"), a title keyword
+    ("something from Mario"), and everything already declined this visit."""
+    pool = list(GAMES)
+    applied = None
+    if query:
+        by_title = [g for g in pool if query.lower().strip() in g.title.lower()]
+        if by_title:
+            pool, applied = by_title, query
+    if applied is None and genre:
+        want = _GENRE_SYNONYMS.get(genre.lower().strip()) or _fuzzy(
+            genre, sorted({g.genre for g in GAMES})
+        )
+        if want:
+            pool = [g for g in pool if g.genre == want]
+            applied = want
+    pool = [g for g in pool if g.title not in (exclude or [])]
+    matches = [g.title for g in pool] if applied else []
+    if not pool:
+        return {
+            "recommendation": None,
+            "reason": "nothing left that matches",
+            "filter": applied,
+        }
     present = _present_profiles(session)
-    pick = suggest_game(present, HISTORIES, BUDGETS, GAMES)
+    pick = suggest_game(present, HISTORIES, BUDGETS, pool)
     if pick is None:
         return {"recommendation": None, "reason": "no screen time left today"}
     return {
         "recommendation": pick.title,
         "console": pick.console,
         "max_players": pick.max_players,
+        "filter": applied,
+        "matches": matches,
     }
 
 
@@ -347,7 +395,10 @@ def summarize(name: str, args: dict, result: dict) -> str:
     if name == "assign_joystick":
         return f"{result['player']} → {result['joystick']} joystick"
     if name == "recommend_game":
-        return f"suggests {result.get('recommendation')}"
+        filt = f" ({result['filter']})" if result.get("filter") else ""
+        skip = args.get("exclude")
+        skipped = f", skipping {', '.join(skip)}" if skip else ""
+        return f"suggests {result.get('recommendation')}{filt}{skipped}"
     if name == "remember":
         return f"remembered about {result['remembered_about']}: {result['note']!r}"
     if name == "create_profile":

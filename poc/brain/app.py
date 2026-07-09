@@ -165,6 +165,8 @@ def start(req: StartRequest) -> Reply:
         "attention": "engaged",
         "pending": None,
         "last_activity": time.time(),
+        "last_suggested": None,
+        "rejected": [],
     }
     _SESSIONS[session_id] = state
 
@@ -183,6 +185,7 @@ def start(req: StartRequest) -> Reply:
     text, greet_actions = agent.greet(sess, state["language"])
 
     state["running_game"] = sess.running_game
+    state["last_suggested"] = sess.last_suggested
     return Reply(
         session_id=session_id,
         text=text,
@@ -280,6 +283,8 @@ def turn(req: TurnRequest) -> Reply:
         conn=store.connect(),
         present=state["present"],
         running_game=state["running_game"],
+        last_suggested=state.get("last_suggested"),
+        rejected=list(state.get("rejected") or []),
     )
     text, turn_actions, kind = agent.handle_turn(
         sess, user_text, state["language"], pending=state["pending"]
@@ -287,7 +292,14 @@ def turn(req: TurnRequest) -> Reply:
     actions.extend(turn_actions)
 
     state["running_game"] = sess.running_game
-    state["pending"] = "name" if kind == "ask_name" else None
+    state["last_suggested"] = sess.last_suggested
+    state["rejected"] = sess.rejected
+    if kind == "ask_name":
+        state["pending"] = "name"
+    elif kind not in ("unclear", "context"):
+        # An unclear/side reply doesn't withdraw the question Arc just asked
+        # ("what's your name?") — the person can still answer it next.
+        state["pending"] = None
     state["last_activity"] = now
     if sess.new_language:
         state["language"] = sess.new_language

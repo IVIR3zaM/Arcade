@@ -32,7 +32,7 @@ fetch_voice() {
     fi
 }
 fetch_voice "en/en_US/kristin/medium" "en_US-kristin-medium.onnx"
-fetch_voice "de/de_DE/ramona/low" "de_DE-ramona-low.onnx"
+fetch_voice "de/de_DE/eva_k/x_low" "de_DE-eva_k-x_low.onnx"
 fetch_voice "fa/fa_IR/amir/medium" "fa_IR-amir-medium.onnx"
 
 # Warm the whisper model into the cache (HF_HOME points into the volume) so the

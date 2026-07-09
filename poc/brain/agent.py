@@ -66,6 +66,8 @@ _INTENT_SCHEMA = {
     "properties": {
         "intent": {"type": "string", "enum": _INTENT_NAMES},
         "title": {"type": "string"},
+        "genre": {"type": "string"},
+        "query": {"type": "string"},
         "note": {"type": "string"},
         "name": {"type": "string"},
         "start": {"type": "string"},
@@ -115,6 +117,10 @@ _INTENT_EXAMPLES = (
     '"ich bin fertig" -> {"intent":"stop_game"}\n'
     '"what can I play?" -> {"intent":"list_games"}\n'
     '"was soll ich spielen?" -> {"intent":"recommend"}\n'
+    '"I want something in sport" -> {"intent":"recommend","genre":"sports"}\n'
+    '"ich möchte ein rennspiel" -> {"intent":"recommend","genre":"racing"}\n'
+    '"I wanna play something from mario" -> {"intent":"recommend","query":"Mario"}\n'
+    '"not that one, something else" -> {"intent":"recommend"}\n'
     '"remember I only play after 5pm" -> {"intent":"remember","note":"only plays after 5pm"}\n'
     '"merk dir, ich spiele nur am Wochenende" -> {"intent":"remember","note":"spielt nur am Wochenende"}\n'
     '"save my profile, I\'m Sam" -> {"intent":"create_profile","name":"Sam"}\n'
@@ -146,7 +152,7 @@ def classify_intent(user_text: str, present: list[str], chat=_chat) -> dict:
         f"Examples:\n{_INTENT_EXAMPLES}\n\n"
         f'Now label this. The person said: "{user_text}"\n'
         "Return JSON with intent plus only the fields that apply "
-        "(title, note, name, start, end, on, language). Convert times to 24h "
+        "(title, genre, query, note, name, start, end, on, language). Convert times to 24h "
         "HH:MM. Only include name if the person actually said a name. If truly "
         'unrelated, use {"intent":"other"}.'
     )
@@ -286,7 +292,11 @@ def is_goodbye(text: str) -> bool:
 # English?" was seen routed to get_context, after which the phrasing model
 # hallucinated "Ich kann kein Englisch sprechen". A language word plus any
 # speak-ish word is unambiguous — no model needed.
-_LANG_WORDS = {"en": ("english", "englisch"), "de": ("german", "deutsch")}
+_LANG_WORDS = {
+    "en": ("english", "englisch"),
+    "de": ("german", "deutsch"),
+    "fa": ("persian", "persisch", "farsi", "فارسی"),
+}
 _LANG_HINTS = {
     "speak",
     "speaks",
@@ -339,8 +349,29 @@ _NAME_CUE = re.compile(
 )
 
 
+def spelled_name(text: str) -> str | None:
+    """A name spelled letter by letter ("It is K-I-A-N") — the person is
+    correcting whisper's spelling, so this beats whatever name was heard."""
+    tokens = re.sub(r"[^\w\s]", " ", text).split()
+    run: list[str] = []
+    best: list[str] = []
+    for tok in tokens + [""]:  # sentinel flushes the last run
+        if len(tok) == 1 and tok.isalpha():
+            run.append(tok)
+        else:
+            if len(run) > len(best):
+                best = run
+            run = []
+    if len(best) < 3:  # "K I" alone is too little signal
+        return None
+    return "".join(best).capitalize()
+
+
 def name_from_utterance(text: str) -> str | None:
     """The name a person introduced themselves with in `text`, or None."""
+    spelled = spelled_name(text)
+    if spelled:
+        return spelled
     m = _NAME_CUE.search(text)
     if not m:
         return None
@@ -349,6 +380,9 @@ def name_from_utterance(text: str) -> str | None:
 
 def extract_name(text: str) -> str | None:
     """Pull a plausible name out of a "what's your name?" reply, else None."""
+    spelled = spelled_name(text)
+    if spelled:
+        return spelled
     t = re.sub(r"[^\w\s'\-]", " ", text).strip()
     low = t.lower()
     for p in _NAME_PREFIXES:
@@ -356,10 +390,13 @@ def extract_name(text: str) -> str | None:
             t = t[len(p) :].strip()
             break
     words = t.split()
-    if not words or len(words) > 2:  # a name is 1-2 words; more = a sentence
-        return None
-    name = " ".join(w.capitalize() for w in words)
-    return _clean_name(name)
+    if words and len(words) <= 2:  # a name is 1-2 words; more = a sentence
+        return _clean_name(" ".join(w.capitalize() for w in words))
+    # "Kean, it is K." — the name leads, the rest is trailing chatter.
+    m = re.match(r"\s*([A-Za-zÀ-ÿäöüß]{2,})\s*[,.!]", text)
+    if m:
+        return _clean_name(m.group(1).capitalize())
+    return None
 
 
 # --- step 2: execute (pure code — owns all access control) ------------------
@@ -395,21 +432,38 @@ def execute_intent(
         )
         return result
 
+    def recommend(genre: str = "", query: str = "") -> tuple[str, dict, list[dict]]:
+        # Asking again means the last offer was declined — never repeat it.
+        if session.last_suggested and session.last_suggested not in session.rejected:
+            session.rejected.append(session.last_suggested)
+        res = do(
+            "recommend_game", genre=genre, query=query, exclude=list(session.rejected)
+        )
+        session.last_suggested = res.get("recommendation")
+        return "recommendation", res, actions
+
     if kind == "play_game":
         res = do("launch_game", title=intent.get("title", ""))
         if "error" in res:
             return "game_not_found", res, actions
         joystick = do("assign_joystick", player=_speaker(session))
+        # They picked one — the browse context is over.
+        session.last_suggested = None
+        session.rejected = []
         return "played", {**res, "joystick": joystick.get("joystick")}, actions
 
     if kind == "stop_game":
+        if session.running_game is None and session.last_suggested:
+            # "I said no Pong" mid-browse gets misread as stop_game; with nothing
+            # running it's a rejection of the last offer — suggest something else.
+            return recommend()
         return "stopped", do("close_game"), actions
 
     if kind == "list_games":
         return "games_list", do("list_games"), actions
 
     if kind == "recommend":
-        return "recommendation", do("recommend_game"), actions
+        return recommend(genre=intent.get("genre", ""), query=intent.get("query", ""))
 
     if kind == "remember":
         return (
@@ -549,9 +603,19 @@ def _render(kind: str, data: dict, language: str) -> str | None:
     if kind == "recommendation":
         rec = data.get("recommendation")
         if rec is None:
+            if data.get("reason") == "nothing left that matches":
+                if de:
+                    return "Hmm, da fällt mir nichts Passendes mehr ein — soll ich alle Spiele aufzählen?"
+                return "Hmm, I'm out of matching ideas — want me to list all the games?"
             if de:
                 return "Für heute ist leider keine Bildschirmzeit mehr übrig — vielleicht morgen!"
             return "Looks like there's no screen time left for today — maybe tomorrow!"
+        others = [m for m in data.get("matches", []) if m != rec][:2]
+        if others:
+            also = ", ".join(others)
+            if de:
+                return f"Wie wäre es mit {rec}? Wir haben auch {also}."
+            return f"How about {rec}? We also have {also}."
         return f"Wie wäre es mit {rec}?" if de else f"How about {rec}?"
 
     if kind == "remembered":
@@ -667,7 +731,9 @@ def greet(session, language: str, chat=_chat) -> tuple[str, list[dict]]:
                 "summary": tools.summarize("get_player", {}, res),
             }
         )
-        people.append(res)
+        # The raw "hint" is instructions for the phrasing prompt's author, not the
+        # model — the 3B was seen echoing it verbatim ("[Hint]") into the greeting.
+        people.append({k: v for k, v in res.items() if k != "hint"})
     rec = tools.run_tool(session, "recommend_game", {})
     actions.append(
         {
@@ -676,6 +742,9 @@ def greet(session, language: str, chat=_chat) -> tuple[str, list[dict]]:
             "summary": tools.summarize("recommend_game", {}, rec),
         }
     )
+    # Remember what was offered: if the person then asks for something else, the
+    # greeting's suggestion counts as declined and won't be repeated.
+    session.last_suggested = rec.get("recommendation")
     data = {"present": people, "suggestion": rec.get("recommendation")}
     return phrase("greeting", data, language, chat=chat), actions
 

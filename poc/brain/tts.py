@@ -13,7 +13,7 @@ import tempfile
 _VOICES_DIR = os.environ.get("VOICES_DIR", "/models/voices")
 _VOICES = {
     "en": f"{_VOICES_DIR}/en_US-kristin-medium.onnx",
-    "de": f"{_VOICES_DIR}/de_DE-ramona-low.onnx",
+    "de": f"{_VOICES_DIR}/de_DE-eva_k-x_low.onnx",
     "fa": f"{_VOICES_DIR}/fa_IR-amir-medium.onnx",
 }
 
