@@ -48,3 +48,9 @@ ci:
     provider: github
     jobs:
         - verify
+
+# Per-directory overrides. Each path may set its own version, languages, changelog,
+#   versioning (semver | calver), strictness, or `enabled: false` to prune the subtree.
+directories:
+    poc:
+        enabled: false

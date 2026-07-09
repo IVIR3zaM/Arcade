@@ -27,6 +27,8 @@ services:
       HF_HOME: /models/hf                  # keep the whisper model in the volume
       VOICES_DIR: /models/voices           # keep the Piper voices in the volume
       ARCADE_DB: /data/arcade.db           # persistent profiles, memory, schedules
+      ENGAGE_TIMEOUT_S: "${ENGAGE_TIMEOUT_S:-45}"  # silence before Arc needs "Hey Arc" again
+      MONITOR_IDLE_S: "${MONITOR_IDLE_S:-120}"     # inactivity (no game) before the monitor powers off
     volumes:
       - pi_models:/models  # caches the LLM, whisper model, and voices across runs
       - pi_data:/data      # the arcade's memory — survives restarts

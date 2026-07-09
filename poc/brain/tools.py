@@ -36,6 +36,7 @@ class Session:
     present: list[str]  # names as the camera reports them; "unknown" = a guest
     running_game: str | None = None
     log: list[dict] = field(default_factory=list)  # tool calls made this session
+    new_language: str | None = None  # set when the person asks to switch language
 
     def display_present(self) -> list[str]:
         return ["Guest" if n == "unknown" else n for n in self.present]
@@ -194,6 +195,21 @@ def delete_profile(session: Session, name: str) -> dict:
     return {"deleted": matched} if ok else {"error": f"no profile named {matched}"}
 
 
+def set_monitor(session: Session, on: bool) -> dict:
+    """Turn the cabinet's monitor on or off (mocked; CEC/wlr-randr on the Pi)."""
+    hardware.set_monitor(bool(on))
+    return {"monitor_on": bool(on)}
+
+
+def set_language(session: Session, language: str, name: str = "") -> dict:
+    """Switch the conversation language, persisting it on the speaker's profile."""
+    if language not in ("en", "de"):
+        return {"error": f"unsupported language {language!r} (en or de)"}
+    session.new_language = language
+    persisted = bool(name) and store.set_language(session.conn, name, language)
+    return {"language": language, "persisted_for": name if persisted else None}
+
+
 def get_context(session: Session) -> dict:
     current = hardware.now()
     schedules = store.list_schedules(session.conn)
@@ -205,6 +221,7 @@ def get_context(session: Session) -> dict:
         "cpu_temp_c": hardware.read_temp_c(),
         "mic_on": devices["mic_on"],
         "camera_on": devices["camera_on"],
+        "monitor_on": hardware.monitor_on(),
         "privacy_schedules": [
             {"start": s["start_hm"], "end": s["end_hm"], "reason": s["reason"]}
             for s in schedules
@@ -267,6 +284,8 @@ _DISPATCH = {
     "delete_profile": delete_profile,
     "get_context": get_context,
     "set_privacy_schedule": set_privacy_schedule,
+    "set_monitor": set_monitor,
+    "set_language": set_language,
 }
 
 
@@ -337,6 +356,13 @@ def summarize(name: str, args: dict, result: dict) -> str:
         return f"deleted {result['deleted']}"
     if name == "set_privacy_schedule":
         return f"mic+camera OFF {result['start']}–{result['end']} (by {result['by']})"
+    if name == "set_monitor":
+        return f"monitor → {'ON' if result['monitor_on'] else 'OFF'}"
+    if name == "set_language":
+        who = (
+            f" (saved for {result['persisted_for']})" if result["persisted_for"] else ""
+        )
+        return f"language → {result['language']}{who}"
     if name == "get_context":
         return f"{result['weekday']} {result['datetime']}, {result['cpu_temp_c']}°C, mic {'on' if result['mic_on'] else 'OFF'}"
     return str(result)

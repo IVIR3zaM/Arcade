@@ -102,6 +102,16 @@ def delete_profile(conn: sqlite3.Connection, name: str) -> bool:
     return cur.rowcount > 0
 
 
+def set_language(conn: sqlite3.Connection, name: str, language: str) -> bool:
+    """Persist a person's preferred language; False if they have no profile."""
+    cur = conn.execute(
+        "UPDATE profiles SET language = ? WHERE lower(name) = lower(?)",
+        (language, name),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def append_note(conn: sqlite3.Connection, name: str, note: str) -> str | None:
     """Append a learned context note to a person's memory; returns the full memory."""
     prof = get_profile(conn, name)

@@ -22,6 +22,19 @@ def read_temp_c() -> float:
     return float(os.environ.get("FAKE_TEMP_C", "54.5"))
 
 
+# The cabinet's one monitor. On the Pi this is `wlr-randr`/CEC power control; here
+# it's a flag the tools flip and the idle timer turns off.
+_MONITOR = {"on": False}
+
+
+def monitor_on() -> bool:
+    return _MONITOR["on"]
+
+
+def set_monitor(on: bool) -> None:
+    _MONITOR["on"] = bool(on)
+
+
 def _hm_to_minutes(hm: str) -> int:
     h, m = hm.split(":")
     return int(h) * 60 + int(m)
