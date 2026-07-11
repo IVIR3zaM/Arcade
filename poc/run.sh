@@ -17,7 +17,30 @@ docker compose up -d --build
 
 echo "==> Waiting for the Pi box to be ready."
 echo "    (first run pulls the model ~2GB inside the container — this can take a while)"
-until curl -sf "$BRAIN_URL/health" >/dev/null 2>&1; do sleep 3; done
+echo "    Live: elapsed time · container RAM (used / limit, % of the 8GB cap) · current step"
+
+start=$(date +%s)
+stats="starting…"
+phase=""
+i=0
+until curl -sf "$BRAIN_URL/health" >/dev/null 2>&1; do
+  elapsed=$(( $(date +%s) - start ))
+  # The docker calls are ~1-2s each, so refresh RAM + phase every ~4th tick and
+  # keep the seconds counter ticking every second in between.
+  if (( i % 4 == 0 )); then
+    cid="$(docker compose ps -q pi-box 2>/dev/null || true)"
+    if [ -n "$cid" ]; then
+      stats="$(docker stats --no-stream --format '{{.MemUsage}} ({{.MemPerc}} of cap)' "$cid" 2>/dev/null || echo 'n/a')"
+    fi
+    phase="$(docker compose logs --tail 30 pi-box 2>/dev/null | grep -aoE '\[pi-box\].*' | tail -1 || true)"
+    phase="${phase#*] }"          # drop the "[pi-box] " tag
+    phase="${phase:0:64}"          # keep the status line from wrapping
+  fi
+  printf '\r    ⏳ %3ds · RAM %s · %s\033[K' "$elapsed" "$stats" "${phase:-booting…}"
+  sleep 1
+  i=$(( i + 1 ))
+done
+printf '\r    ✓ Pi box ready in %ds · RAM %s\033[K\n' "$(( $(date +%s) - start ))" "$stats"
 
 echo "==> Setting up the host mic/speaker CLI..."
 # Kept OUTSIDE the repo so it doesn't pollute the tree (cairn verify would scan a

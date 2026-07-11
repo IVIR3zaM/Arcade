@@ -78,6 +78,9 @@ def _startup() -> None:
     conn = store.connect()
     store.init(conn)
     conn.close()
+    # Load both Piper voices into THIS process now, so the first reply doesn't
+    # pay the cold model-load cost mid-conversation.
+    tts.warmup()
 
 
 class StartRequest(BaseModel):

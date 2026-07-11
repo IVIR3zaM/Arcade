@@ -16,6 +16,12 @@ _MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
 # fight the container's CFS throttle instead of mirroring the Pi's 4 cores.
 _CPU_THREADS = int(os.environ.get("COMPANION_NUM_THREAD", "4"))
 
+# The cabinet speaks these two, and ONLY these two, are allowed as transcription
+# languages. Free auto-detect across all ~99 whisper languages was the worst
+# latency spike we saw: on foreign or garbled speech it would lock onto Arabic
+# or Polish and burn 6-9s decoding hallucinated text. We clamp to EN/DE.
+_SUPPORTED = ("en", "de")
+
 _model: WhisperModel | None = None
 
 
@@ -28,19 +34,51 @@ def _get_model() -> WhisperModel:
     return _model
 
 
+def _load_audio(wav_path: str):
+    """Decode the WAV once so detection and transcription can share it."""
+    try:
+        from faster_whisper.audio import decode_audio
+
+        return decode_audio(wav_path, sampling_rate=16000)
+    except Exception:
+        return None  # fall back to the file path + auto-detect
+
+
+def _detect_en_or_de(model: WhisperModel, audio) -> str:
+    """Pick EN or DE — never a third language — from a cheap detection pass.
+
+    This is the key latency fix: we decide the language BEFORE decoding, so a
+    non-EN/DE utterance is decoded as the more-likely of the two (fast, ~1.8s)
+    instead of whisper wandering off into Arabic/Polish (6-9s of garbage)."""
+    try:
+        _lang, _prob, all_probs = model.detect_language(audio)
+        probs = dict(all_probs)
+        return "en" if probs.get("en", 0.0) >= probs.get("de", 0.0) else "de"
+    except Exception:
+        return "de"  # cabinet default; keeps working if the API differs
+
+
 def transcribe(
     wav_path: str, language: str | None = None, initial_prompt: str | None = None
 ) -> tuple[str, str, float]:
-    """Transcribe a WAV file. Returns (text, detected_language, probability).
+    """Transcribe a WAV file. Returns (text, language, probability).
 
-    `language=None` lets whisper AUTO-DETECT the spoken language — essential for
-    a bilingual cabinet: forcing 'de' makes whisper mangle English speech into
-    German gibberish instead of transcribing it. `initial_prompt` biases decoding
-    toward the arcade's real game + people names so it stops mishearing them
-    (e.g. "Pong" instead of "Point").
+    The language is LOCKED to EN or DE (see `_SUPPORTED`): we run a cheap
+    detection, clamp it to the better of the two, then decode in that language.
+    Forcing a single language mangles the other, so we can't just pin 'de' — but
+    clamping to the two we support keeps English working while eliminating the
+    slow, garbage decodes free auto-detect produced on foreign speech.
+    `initial_prompt` biases decoding toward the arcade's game + people names.
     """
-    segments, info = _get_model().transcribe(
-        wav_path, language=language, initial_prompt=initial_prompt, beam_size=1
+    model = _get_model()
+    audio = _load_audio(wav_path)
+    if language is None:
+        language = _detect_en_or_de(model, audio) if audio is not None else None
+    segments, info = model.transcribe(
+        audio if audio is not None else wav_path,
+        language=language,
+        initial_prompt=initial_prompt,
+        beam_size=1,
     )
     text = "".join(segment.text for segment in segments).strip()
     return text, info.language, info.language_probability

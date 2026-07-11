@@ -65,9 +65,11 @@ The cabinet also manages its own **monitor**: on when a person appears in frame,
 on/off by voice, and **off automatically** when nothing has happened for ~2
 minutes with no game running (the CLI polls `/tick`, so you see it happen).
 **German is the default language** for guests; known people get their saved
-language. Whisper **auto-detects the language of every utterance** (forcing the
-session language would mangle English speech into German gibberish), so Arc
-simply answers in whichever supported language you speak — and an explicit
+language. Whisper detects the language of every utterance but is **locked to
+English or German** — free auto-detect across all languages was our worst latency
+spike (it would lock onto Arabic/Polish on garbled speech and burn 6-9s decoding
+nonsense), so we detect once and clamp to the more-likely of EN/DE. Arc answers in
+whichever of the two you speak — and an explicit
 "speak English" / "sprich Deutsch" still switches and persists it on your
 profile. Language only flips on **genuine spoken content**, never on the wake
 phrase alone ("Hey Arc" reads as English to whisper) or a one-word reply. The
@@ -137,7 +139,10 @@ prefill and each turn only processes the short user line; the model stays reside
 (`keep_alive -1`); `num_ctx` and `num_predict` are kept small; and boot primes the
 intent prefill cache so even the first turn skips the few-shot. Most turns are also
 **pure code** (wake word, goodbye, yes/no, joystick side, language requests) and
-cost **zero** model calls.
+cost **zero** model calls. STT is **locked to EN/DE** (no slow foreign-language
+decodes), and Piper TTS keeps its **voice resident in-process** (a `low`-tier
+English voice) so each reply is a fast in-RAM inference, not a per-reply process
+spawn + model reload.
 
 **Seeing where the time goes.** Every turn is timed step by step. The container
 log prints a live, indented timeline as the engine moves through each step

@@ -32,7 +32,7 @@ fetch_voice() {
         curl -fL -o "$VOICES_DIR/$name.json" "$VOICES_BASE/$rel/$name.json"
     fi
 }
-fetch_voice "en/en_US/kristin/medium" "en_US-kristin-medium.onnx"
+fetch_voice "en/en_US/lessac/low" "en_US-lessac-low.onnx"
 fetch_voice "de/de_DE/eva_k/x_low" "de_DE-eva_k-x_low.onnx"
 
 # Warm the whisper model into the cache (HF_HOME points into the volume) so the
