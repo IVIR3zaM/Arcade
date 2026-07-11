@@ -943,8 +943,8 @@ _CANNED = {
     },
     # Appended whenever Arc goes back to ignoring gameplay chatter.
     "idle_hint": {
-        "en": "I'll go quiet now — say 'Hey Arc' when you need me.",
-        "de": "Ich bin jetzt still — sag 'Hey Arc', wenn du mich brauchst.",
+        "en": "Say 'Hey Arc' when you need me.",
+        "de": "Sag 'Hey Arc', wenn du mich brauchst.",
     },
     # Someone said "Hey Arc" but the camera sees nobody at the cabinet.
     "come_over": {
@@ -982,12 +982,9 @@ def _render(kind: str, data: dict, language: str) -> str | None:
         if de:
             return (
                 f"{data['launched']} startet — nimm den {_JOY_DE.get(joy, joy)} "
-                "Joystick. Viel Spaß! Sag 'Hey Arc', wenn du mich brauchst."
+                "Joystick. Viel Spaß!"
             )
-        return (
-            f"Starting {data['launched']} — grab the {joy} joystick. "
-            "Have fun! Say 'Hey Arc' if you need me."
-        )
+        return f"Starting {data['launched']} — grab the {joy} joystick. Have fun!"
 
     if kind == "played_need_side":
         if de:
@@ -1198,6 +1195,53 @@ def phrase(kind: str, data: dict, language: str, chat=_chat) -> str:
 # --- orchestration ----------------------------------------------------------
 
 
+def _join_names(names: list[str], de: bool) -> str:
+    if len(names) <= 1:
+        return names[0] if names else ""
+    sep = " und " if de else " and "
+    return ", ".join(names[:-1]) + sep + names[-1]
+
+
+def _render_greeting(data: dict, language: str) -> str | None:
+    """A deterministic greeting, or None → let the model phrase it.
+
+    Weaving remembered detail into a warm sentence is where the model earns its
+    ~6s phrasing call, so we defer ONLY when a present person has something noted.
+    The common walk-up (a guest, or a known face with nothing remembered yet) is a
+    fixed sentence — templating it removes the whole model call from session start.
+    """
+    people = data.get("present", [])
+    if not people or any(p.get("memory") for p in people):
+        return None
+    de = language == "de"
+    suggestion = data.get("suggestion")
+    known = [p["name"] for p in people if p.get("known")]
+    has_guest = any(not p.get("known") for p in people)
+
+    if known:
+        hello = (
+            ("Willkommen zurück, " if de else "Welcome back, ")
+            + _join_names(known, de)
+            + "!"
+        )
+    else:
+        hello = "Willkommen!" if de else "Welcome!"
+
+    if suggestion:
+        offer = f" Wie wäre es mit {suggestion}?" if de else f" How about {suggestion}?"
+    else:
+        offer = " Was möchtest du spielen?" if de else " What would you like to play?"
+
+    profile = ""
+    if has_guest:
+        profile = (
+            " Soll ich ein Profil für dich anlegen?"
+            if de
+            else " Want me to save a profile for next time?"
+        )
+    return f"{hello}{offer}{profile}"
+
+
 def greet(session, language: str, chat=_chat) -> tuple[str, list[dict]]:
     """Greeting: code loads each present person + a suggestion, then one phrasing call."""
     actions: list[dict] = []
@@ -1226,7 +1270,12 @@ def greet(session, language: str, chat=_chat) -> tuple[str, list[dict]]:
     # greeting's suggestion counts as declined and won't be repeated.
     session.last_suggested = rec.get("recommendation")
     data = {"present": people, "suggestion": rec.get("recommendation")}
-    return phrase("greeting", data, language, chat=chat), actions
+    # Template the plain greeting (fast); fall back to the model only when there's
+    # remembered detail worth phrasing personally.
+    text = _render_greeting(data, language)
+    if text is None:
+        text = phrase("greeting", data, language, chat=chat)
+    return text, actions
 
 
 def handle_turn(

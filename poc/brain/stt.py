@@ -9,8 +9,10 @@ import os
 
 from faster_whisper import WhisperModel
 
-# 'base' is multilingual (EN + DE) and small enough to feel Pi-like on CPU.
-_MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
+# 'tiny' (multilingual: EN + DE) — ~2x faster than 'base' on a Pi-class CPU. The
+# name/game initial_prompt bias offsets much of the accuracy loss. Override with
+# WHISPER_MODEL=base for higher accuracy at more latency.
+_MODEL_NAME = os.environ.get("WHISPER_MODEL", "tiny")
 # Pin transcription threads to the CPU quota, exactly as the LLM does. Otherwise
 # faster-whisper sees ALL host cores and spawns that many threads, which then
 # fight the container's CFS throttle instead of mirroring the Pi's 4 cores.

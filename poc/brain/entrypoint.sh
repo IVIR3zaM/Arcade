@@ -38,7 +38,7 @@ fetch_voice "de/de_DE/eva_k/x_low" "de_DE-eva_k-x_low.onnx"
 # Warm the whisper model into the cache (HF_HOME points into the volume) so the
 # first transcription doesn't stall.
 echo "[pi-box] ensuring whisper model..."
-python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL:-base}', device='cpu', compute_type='int8')"
+python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL:-tiny}', device='cpu', compute_type='int8')"
 
 # Pre-load the LLM into RAM (keep_alive -1 keeps it resident) so the FIRST person
 # who walks up doesn't wait ~10s for a cold model load. Running a real intent call

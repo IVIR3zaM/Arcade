@@ -39,7 +39,11 @@ FRAME = 480  # 30 ms @ 16 kHz
 START_FRAMES = 3  # consecutive voiced frames to open an utterance (~90 ms)
 END_SILENCE_FRAMES = 27  # unvoiced frames that close it (~810 ms)
 PRE_ROLL_FRAMES = 12  # audio kept from just before speech started (~360 ms)
-MIN_UTTERANCE_FRAMES = 12  # discard blips shorter than ~360 ms of speech
+# Discard blips shorter than ~150 ms of VOICED speech. Kept low on purpose: a
+# one-word answer like "yes" or "left" is mostly unvoiced consonants (the s, f,
+# t don't count as voiced), so at ~360 ms these real answers were being thrown
+# away as noise. The 3-consecutive-voiced open gate still rejects clicks/slams.
+MIN_UTTERANCE_FRAMES = 5
 MAX_UTTERANCE_S = 15
 TICK_EVERY_S = 6  # how often to poll /tick while nobody speaks
 

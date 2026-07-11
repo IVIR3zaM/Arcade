@@ -234,6 +234,7 @@ def _run_start(req: StartRequest, tl: "timing.Timeline") -> Reply:
         "present": present,
         "running_game": None,
         "language": _language_for(present),
+        "language_locked": False,  # once the language is settled, force STT to it
         "attention": "engaged",
         "pending": None,
         "last_activity": time.time(),
@@ -316,13 +317,15 @@ def _run_turn(req: TurnRequest, tl: "timing.Timeline") -> Reply:
     with tempfile.NamedTemporaryFile(suffix=".wav") as wav:
         wav.write(base64.b64decode(req.audio_b64))
         wav.flush()
-        # language=None → whisper auto-detects EN vs DE. Forcing the session
-        # language made whisper mangle English speech into German gibberish,
-        # so a guest (default de) could never ask to switch to English.
+        # Until the language is settled we auto-detect (language=None → EN vs DE);
+        # once it's locked (after a switch) we FORCE it and skip the detection
+        # pass, saving ~0.5s/turn. Trade-off: a sentence in the other language is
+        # mangled until the person explicitly switches again.
+        stt_language = state["language"] if state.get("language_locked") else None
         with tl.step("stt"):
             user_text, spoken_lang, lang_prob = stt.transcribe(
                 wav.name,
-                language=None,
+                language=stt_language,
                 initial_prompt=_whisper_prompt(state["present"]),
             )
     # Trust whisper's pick with decent confidence: it already DECODED the audio
@@ -374,6 +377,7 @@ def _run_turn(req: TurnRequest, tl: "timing.Timeline") -> Reply:
     content = rest if woke else user_text
     if detected and detected != state["language"] and _spoken_content(content):
         state["language"] = detected
+        state["language_locked"] = True  # settled → force STT to it from now on
         actions.append(
             {
                 "tool": "set_language",
@@ -481,6 +485,7 @@ def _run_turn(req: TurnRequest, tl: "timing.Timeline") -> Reply:
     state["last_activity"] = now
     if sess.new_language:
         state["language"] = sess.new_language
+        state["language_locked"] = True  # explicit switch → force STT to it
     if kind == "played":
         # Game's on — stop reacting to gameplay chatter until "Hey Arc".
         state["attention"] = "idle"

@@ -24,6 +24,13 @@ _VOICES = {
 
 _loaded: dict = {}  # model path -> PiperVoice, kept resident across replies
 
+# Cache synthesized WAVs, keyed by (language, text). Many replies are fixed lines
+# — "Sorry, I didn't catch that" (every mishear), goodbyes, "English it is!" — so
+# their second use (this session or the next, since the cache lives as long as the
+# process) is instant. Bounded so a long session can't grow it without limit.
+_CACHE_MAX = 128
+_cache: "dict[tuple[str, str], bytes]" = {}
+
 
 def _voice(language: str):
     """Load (once) and return the resident PiperVoice for a language."""
@@ -63,11 +70,19 @@ def _synthesize_cli(text: str, language: str) -> bytes:
 
 
 def synthesize(text: str, language: str = "en") -> bytes:
-    """Render `text` to spoken WAV bytes in the given language."""
+    """Render `text` to spoken WAV bytes in the given language (cached by text)."""
+    key = (language, text)
+    hit = _cache.get(key)
+    if hit is not None:
+        return hit
     try:
-        return _synthesize_resident(text, language)
+        audio = _synthesize_resident(text, language)
     except Exception:
-        return _synthesize_cli(text, language)
+        audio = _synthesize_cli(text, language)
+    if len(_cache) >= _CACHE_MAX:
+        _cache.pop(next(iter(_cache)))  # evict oldest (insertion order)
+    _cache[key] = audio
+    return audio
 
 
 def warmup() -> None:

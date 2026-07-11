@@ -139,10 +139,15 @@ prefill and each turn only processes the short user line; the model stays reside
 (`keep_alive -1`); `num_ctx` and `num_predict` are kept small; and boot primes the
 intent prefill cache so even the first turn skips the few-shot. Most turns are also
 **pure code** (wake word, goodbye, yes/no, joystick side, language requests) and
-cost **zero** model calls. STT is **locked to EN/DE** (no slow foreign-language
-decodes), and Piper TTS keeps its **voice resident in-process** (a `low`-tier
-English voice) so each reply is a fast in-RAM inference, not a per-reply process
-spawn + model reload.
+cost **zero** model calls. STT uses **whisper `tiny`**, is **locked to EN/DE** (no
+slow foreign-language decodes), and once the language is settled it **stops
+re-detecting** and forces that language (one fewer encoder pass per turn). The
+**greeting is templated** (only a remembered-detail greeting pays the model call),
+replies are kept **short**, and Piper TTS keeps its **voice resident in-process**
+(a `low`-tier English voice) **and caches** synthesized lines, so a repeated fixed
+reply ("Sorry, I didn't catch that", goodbyes) is instant instead of a per-reply
+process spawn + model reload. Net: a typical turn is ~2-3s (STT + optional intent
++ TTS), down from 7-15s.
 
 **Seeing where the time goes.** Every turn is timed step by step. The container
 log prints a live, indented timeline as the engine moves through each step

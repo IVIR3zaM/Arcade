@@ -29,6 +29,7 @@ services:
       COMPANION_MODEL: qwen2.5:3b
       COMPANION_NUM_THREAD: "${COMPANION_NUM_THREAD:-4}"  # worker threads (LLM + whisper) — mirror the Pi's 4 cores
       COMPANION_NUM_CTX: "${COMPANION_NUM_CTX:-2048}"     # small KV cache → cheaper per-token CPU
+      WHISPER_MODEL: "${WHISPER_MODEL:-tiny}"             # tiny = fast STT; set base for more accuracy
       OLLAMA_KEEP_ALIVE: "-1"  # keep the model resident so turns don't reload it
       OLLAMA_MODELS: /models/ollama        # keep the LLM in the cached volume
       HF_HOME: /models/hf                  # keep the whisper model in the volume

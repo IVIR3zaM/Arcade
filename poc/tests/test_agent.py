@@ -556,14 +556,26 @@ def test_no_game_running_plus_rejection_suggests_something_else():
     assert data["recommendation"] != "Pong"
 
 
-def test_greeting_facts_do_not_include_the_raw_hint():
+def test_guest_greeting_is_templated_and_offers_a_profile():
+    # A plain walk-up (guest, nothing remembered) is templated — no ~6s model call.
+    def boom(system, user, as_json=False):
+        raise AssertionError("a plain greeting must not need the model")
+
+    text, _actions = agent.greet(_session(["unknown"]), "en", chat=boom)
+    assert "profile" in text.lower()  # offers to save one for the guest
+
+
+def test_greeting_with_memory_uses_the_model_without_leaking_the_hint():
     prompts = []
 
     def chat(system, user, as_json=False):
         prompts.append(user)
-        return "Welcome!"
+        return "Welcome back!"
 
-    agent.greet(_session(["unknown"]), "en", chat=chat)
+    sess = _session(["Kian"])
+    store.append_note(sess.conn, "Kian", "loves Pong")  # now there's memory
+    agent.greet(sess, "en", chat=chat)
+    assert prompts  # remembered detail → the model phrases it
     assert "hint" not in prompts[0]  # the 3B echoed "[Hint]" into speech once
 
 
@@ -637,15 +649,15 @@ def test_templates_render_in_german_without_the_model():
     text = agent.phrase(
         "played", {"launched": "Pong", "joystick": "left"}, "de", chat=boom
     )
-    assert "Pong" in text and "linken" in text and "Hey Arc" in text
+    assert "Pong" in text and "linken" in text and "Viel Spaß" in text
     assert "Admin" in agent.phrase("access_denied", {"action": "x"}, "de", chat=boom)
 
 
-def test_greet_loads_profile_then_phrases_once():
-    def chat(system, user, as_json=False):
-        assert as_json is False  # greeting never needs an intent call
-        return "Welcome back, Kian!"
+def test_greet_known_person_without_memory_is_templated():
+    # Known face, nothing remembered → deterministic greeting, no model call.
+    def boom(system, user, as_json=False):
+        raise AssertionError("a plain greeting must not need the model")
 
-    text, actions = agent.greet(_session(["Kian"]), "en", chat=chat)
-    assert text == "Welcome back, Kian!"
+    text, actions = agent.greet(_session(["Kian"]), "en", chat=boom)
+    assert "Kian" in text
     assert [a["tool"] for a in actions] == ["get_player", "recommend_game"]
