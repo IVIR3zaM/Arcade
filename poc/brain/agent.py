@@ -36,6 +36,10 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 # far more threads than the quota and fight the throttle. Pinning to 4 both mirrors
 # the Pi's 4 physical cores and avoids that contention.
 NUM_THREAD = int(os.environ.get("COMPANION_NUM_THREAD", "4"))
+# A small context is plenty (the intent prompt is a few hundred tokens) and keeps
+# the KV cache — and thus per-token CPU cost — low. Overridable if a longer
+# phrasing prompt ever needs it.
+NUM_CTX = int(os.environ.get("COMPANION_NUM_CTX", "2048"))
 
 PERSONA = (
     "You are Arc, the friendly voice of a family arcade cabinet. You are warm and "
@@ -110,7 +114,15 @@ def allowed_intents(session) -> list[str]:
 
 
 def _chat(system: str, user: str, as_json: bool = False) -> str:
-    """One small Ollama chat call. Kept resident (keep_alive -1) and short."""
+    """One small Ollama chat call. Kept resident (keep_alive -1) and short.
+
+    Latency on a Pi-class CPU is dominated by (a) prefill of the prompt and
+    (b) the number of tokens generated, so both are kept tight:
+      * the intent SYSTEM prompt is constant, so llama.cpp keeps its prefill
+        cached between turns and only the short user line is processed;
+      * num_predict caps generation (intents are tiny JSON; replies are ≤2
+        sentences), and a small num_ctx keeps the KV cache cheap.
+    """
     import requests
 
     body = {
@@ -119,8 +131,9 @@ def _chat(system: str, user: str, as_json: bool = False) -> str:
         "keep_alive": -1,
         "options": {
             "temperature": 0.1 if as_json else 0.3,
-            "num_predict": 80 if as_json else 100,
+            "num_predict": 48 if as_json else 80,
             "num_thread": NUM_THREAD,
+            "num_ctx": NUM_CTX,
         },
         "messages": [
             {"role": "system", "content": system},
@@ -173,32 +186,36 @@ _INTENT_EXAMPLES = (
 )
 
 
+# The system prompt is CONSTANT (all the bulky few-shot lives here), so
+# llama.cpp caches its prefill and reuses it every turn — only the short user
+# line below is processed each time. That is the single biggest per-turn CPU
+# saving on a Pi. The state-specific "doable now" list and the utterance go in
+# the tiny user message; the possibility map is enforced for real in code.
+_INTENT_SYSTEM = (
+    "You label what a person at an arcade wants, as JSON only (no prose). "
+    "The person may speak English or German. "
+    f"Known games: {', '.join(g.title for g in GAMES)}.\n"
+    "Return JSON with intent plus only the fields that apply "
+    "(title, genre, query, note, name, start, end, on, language). Convert times "
+    "to 24h HH:MM. Only include name if the person actually said a name. If "
+    'truly unrelated, use {"intent":"other"}.\n'
+    f"Examples:\n{_INTENT_EXAMPLES}"
+)
+
+
 def classify_intent(
     user_text: str, present: list[str], chat=_chat, allowed: list[str] | None = None
 ) -> dict:
     """Small JSON call: extract the user's intent. Never decides access.
 
-    `allowed` is the possibility map for the current state — only those intents
-    are offered to the model, and anything outside it is coerced to "other" (a
-    3B occasionally reaches past the menu it was given).
+    `allowed` is the possibility map for the current state — those are the
+    intents offered to the model, and anything outside it is coerced to "other"
+    (a 3B occasionally reaches past the menu it was given).
     """
     allowed = allowed or _INTENT_NAMES
-    titles = ", ".join(g.title for g in GAMES)
-    system = (
-        "You label what a person at an arcade wants, as JSON only (no prose). "
-        "The person may speak English or German. "
-        f"Intents: {', '.join(allowed)}. Known games: {titles}."
-    )
-    user = (
-        f"Examples:\n{_INTENT_EXAMPLES}\n\n"
-        f'Now label this. The person said: "{user_text}"\n'
-        "Return JSON with intent plus only the fields that apply "
-        "(title, genre, query, note, name, start, end, on, language). Convert times to 24h "
-        "HH:MM. Only include name if the person actually said a name. If truly "
-        'unrelated, use {"intent":"other"}.'
-    )
+    user = f'Doable right now: {", ".join(allowed)}.\nThe person said: "{user_text}"'
     try:
-        data = json.loads(chat(system, user, as_json=True))
+        data = json.loads(chat(_INTENT_SYSTEM, user, as_json=True))
     except (json.JSONDecodeError, TypeError):
         return {"intent": "other"}
     if data.get("intent") not in allowed:

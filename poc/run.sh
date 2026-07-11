@@ -4,8 +4,8 @@
 #   ./run.sh
 #
 # It brings up the single Pi-like container (Ollama + whisper + Piper + brain, all
-# sharing a 4-core / 8GB budget), then sets up a tiny host-side venv for the
-# mic/speaker CLI and hands you the scenario picker.
+# sharing a throttled CPU / 8GB budget sized to approximate the Pi), then sets up a
+# tiny host-side venv for the mic/speaker CLI and hands you the scenario picker.
 set -euo pipefail
 
 cd "$(dirname "$0")"

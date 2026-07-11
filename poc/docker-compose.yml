@@ -1,12 +1,17 @@
 # One container = one Pi. It runs Ollama + whisper + Piper + the brain API, all
-# sharing a single 4-core / 8GB budget, mirroring the cabinet's Raspberry Pi 5
-# (8GB). On the real Pi these all contend for one board's resources; capping this
-# one container the same way is the faithful analog (two separately-capped
-# containers could exceed a Pi's shared pool).
+# sharing a single budget, mirroring the cabinet's Raspberry Pi 5 (8GB). On the
+# real Pi these all contend for one board's resources; capping this one container
+# the same way is the faithful analog (two separately-capped containers could
+# exceed a Pi's shared pool).
 #
-# CAVEAT: this matches core COUNT and RAM, not per-core SPEED — Apple-Silicon
-# cores are ~2-3x a Pi 5 core and Docker can't throttle to Pi clock. Treat the
-# latency you see as an optimistic upper bound; real numbers are Phase 8.9.
+# APPROXIMATING PI SPEED: a Pi 5 has 4 cores at ~2.4GHz (Cortex-A76). An Apple-
+# Silicon core is ~2.5-3x that per-core, so 4 Mac cores would run ~3x too fast.
+# We keep FOUR worker threads everywhere (COMPANION_NUM_THREAD=4 → Pi-like
+# parallelism), but cap the container's aggregate compute with a fractional CPU
+# quota (PI_CPUS, default 1.5 ≈ 4 Pi cores' worth). Net: four threads sharing a
+# throttled quota behave like four slow cores. Raise PI_CPUS toward 4 to unshackle
+# it, or lower it if your Mac is faster. (Memory bandwidth still can't be throttled
+# — a Pi's is far lower — so even at PI_CPUS=1.5 this is a mild upper bound.)
 #
 # NOTE: give Docker Desktop at least 8GB (Settings → Resources) or the 8g limit
 # will squeeze the host. First run downloads the models (LLM ~2GB + whisper +
@@ -22,6 +27,8 @@ services:
       # phrasing) it can handle fast on Pi-class CPU. Try qwen2.5:7b for nicer
       # wording at higher latency.
       COMPANION_MODEL: qwen2.5:3b
+      COMPANION_NUM_THREAD: "${COMPANION_NUM_THREAD:-4}"  # worker threads (LLM + whisper) — mirror the Pi's 4 cores
+      COMPANION_NUM_CTX: "${COMPANION_NUM_CTX:-2048}"     # small KV cache → cheaper per-token CPU
       OLLAMA_KEEP_ALIVE: "-1"  # keep the model resident so turns don't reload it
       OLLAMA_MODELS: /models/ollama        # keep the LLM in the cached volume
       HF_HOME: /models/hf                  # keep the whisper model in the volume
@@ -32,7 +39,7 @@ services:
     volumes:
       - pi_models:/models  # caches the LLM, whisper model, and voices across runs
       - pi_data:/data      # the arcade's memory — survives restarts
-    cpus: "4"
+    cpus: "${PI_CPUS:-1.5}"  # aggregate compute cap ≈ a Pi 5's 4 cores (see header)
     mem_limit: 8g
     ports:
       - "8080:8000"  # the host mic/speaker CLI talks to localhost:8080

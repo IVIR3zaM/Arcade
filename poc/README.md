@@ -69,11 +69,10 @@ language. Whisper **auto-detects the language of every utterance** (forcing the
 session language would mangle English speech into German gibberish), so Arc
 simply answers in whichever supported language you speak — and an explicit
 "speak English" / "sprich Deutsch" still switches and persists it on your
-profile. **Farsi is enabled as an experimental third language**: the wake word,
-goodbye/yes/no words, and a handful of canned lines are hand-translated, and
-every other reply is phrased by the LLM in Persian (Piper `fa_IR-amir` voice) —
-it exists purely to test how far a small local model stretches. Any *other*
-language gets an honest "I can speak English, German, and a bit of Farsi."
+profile. Language only flips on **genuine spoken content**, never on the wake
+phrase alone ("Hey Arc" reads as English to whisper) or a one-word reply. The
+cabinet speaks **English and German** only; any other language (Persian,
+French, …) gets an honest "I can speak English and German."
 
 Launching a game **asks which joystick you want** (one player; two players get
 one each automatically), and the answer — "the right one" — is understood
@@ -104,7 +103,7 @@ Docker Desktop on macOS can't reach the mic or speakers, so the work is split:
 one **Pi box** container does all the AI; the Mac is just its mic and speaker.
 
 ```
-  MacBook (host)                     ONE container = the Pi 5 (capped 4 cores / 8GB)
+  MacBook (host)                     ONE container = the Pi 5 (throttled CPU / 8GB)
  ┌───────────────────┐   HTTP + WAV  ┌────────────────────────────────────────────┐
  │ host/companion.py │ ─────────────▶│ FastAPI app.py                             │
  │  records your mic │               │   whisper STT (biased to the real names)   │
@@ -116,16 +115,29 @@ one **Pi box** container does all the AI; the Mac is just its mic and speaker.
                                       └────────────────────────────────────────────┘
 ```
 
-Everything runs **inside this one container**, sharing a single **4-core / 8 GB**
-budget — the same pool the Pi gives them. The base is Debian 12 Bookworm arm64,
-which is what Raspberry Pi OS (Bookworm) is, running natively as arm64 on Apple
-Silicon.
+Everything runs **inside this one container**, sharing a single **throttled CPU
+/ 8 GB** budget — the same pool the Pi gives them. The base is Debian 12 Bookworm
+arm64, which is what Raspberry Pi OS (Bookworm) is, running natively as arm64 on
+Apple Silicon.
 
-**Honest caveat about performance.** This matches the Pi's core *count*, RAM, OS,
-and architecture — but not per-core *speed*. An Apple-Silicon core is ~2-3× a Pi
-5 core, and Docker caps CPU time, not clock rate. Treat the latency and tokens/sec
-you see as an **optimistic upper bound**; real performance is the Phase 8.9
-hardware checkpoint. Give Docker Desktop ≥ 8 GB (Settings → Resources).
+**Approximating Pi speed.** An Apple-Silicon core is ~2.5-3× a Pi 5 core, so four
+Mac cores would run far too fast to be representative. Instead we keep **four
+worker threads** (`COMPANION_NUM_THREAD=4`, for LLM *and* whisper, matching the
+Pi's 4 cores) but cap the container's **aggregate compute** with a fractional
+quota (`PI_CPUS`, default **1.5** ≈ four Pi cores' worth) — four threads sharing a
+throttled quota behave like four slow cores. Tune it: `PI_CPUS=4 docker compose up`
+to unshackle, lower to throttle harder. One thing Docker still can't reproduce is
+the Pi's much lower **memory bandwidth**, so even at `PI_CPUS=1.5` this remains a
+mild optimistic bound. Give Docker Desktop ≥ 8 GB (Settings → Resources).
+
+**Keeping turns fast under the throttle.** Per-turn CPU is dominated by prompt
+*prefill* and tokens *generated*, so both are minimized: the intent **system
+prompt is constant** (all the few-shot lives there) so llama.cpp caches its
+prefill and each turn only processes the short user line; the model stays resident
+(`keep_alive -1`); `num_ctx` and `num_predict` are kept small; and boot primes the
+intent prefill cache so even the first turn skips the few-shot. Most turns are also
+**pure code** (wake word, goodbye, yes/no, joystick side, language requests) and
+cost **zero** model calls.
 
 **What the PoC found (read this).** A 3B model *cannot* be an autonomous
 many-tools agent — given one big prompt with a dozen tools it under-calls them and
@@ -135,7 +147,7 @@ sometimes goes silent, and left to fill arguments freely it does things like
 (execution, access control, name sanity, phrasing templates) — **a 3B works**:
 greeting, fuzzy game launch, remembering preferences, guest onboarding, admin
 privacy scheduling, and code-enforced refusals all run correctly. Routine turns
-now cost **one** model call instead of two, so on the Pi-accurate 4-core cap a
+cost **one** model call instead of two: on the throttled Pi-approximating cap a
 turn (STT + intent + template + TTS) lands at **~2–4 s**; the outcomes that still
 use a phrasing call (greeting, free-form questions) take ~5–8 s, and code-matched
 replies (goodbye, the name reply) ~1–2 s. That's the honest answer to "can a

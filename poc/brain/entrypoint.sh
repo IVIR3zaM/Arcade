@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Boot the whole Pi box in one process tree: Ollama's local server, then a one-time
 # fetch of the AI models (LLM + whisper + Piper voices) into the cached volume, then
-# the brain API. Everything shares this container's 4-core / 8GB budget, like the Pi.
+# the brain API. Everything shares this container's throttled CPU / 8GB budget,
+# sized to approximate the Pi (see docker-compose.yml: PI_CPUS + COMPANION_NUM_THREAD).
 #
 # The model fetches need network the first time (Ollama registry + Hugging Face);
 # after that they're served from the mounted volume and startup is fast.
@@ -33,7 +34,6 @@ fetch_voice() {
 }
 fetch_voice "en/en_US/kristin/medium" "en_US-kristin-medium.onnx"
 fetch_voice "de/de_DE/eva_k/x_low" "de_DE-eva_k-x_low.onnx"
-fetch_voice "fa/fa_IR/amir/medium" "fa_IR-amir-medium.onnx"
 
 # Warm the whisper model into the cache (HF_HOME points into the volume) so the
 # first transcription doesn't stall.
@@ -41,10 +41,12 @@ echo "[pi-box] ensuring whisper model..."
 python -c "from faster_whisper import WhisperModel; WhisperModel('${WHISPER_MODEL:-base}', device='cpu', compute_type='int8')"
 
 # Pre-load the LLM into RAM (keep_alive -1 keeps it resident) so the FIRST person
-# who walks up doesn't wait ~10s for a cold model load.
-echo "[pi-box] warming up the LLM ($MODEL)..."
-curl -s http://localhost:11434/api/generate \
-    -d "{\"model\":\"$MODEL\",\"prompt\":\"hi\",\"stream\":false,\"keep_alive\":-1}" >/dev/null || true
+# who walks up doesn't wait ~10s for a cold model load. Running a real intent call
+# also primes llama.cpp's prefill cache for the constant intent SYSTEM prompt, so
+# the first live turn only has to process the short user line — not the few-shot.
+echo "[pi-box] warming up the LLM ($MODEL) + intent prefill cache..."
+python -c "from brain import agent; agent.classify_intent('hallo', ['Guest'])" \
+    >/dev/null 2>&1 || true
 
 echo "[pi-box] starting the brain API on :8000"
 exec uvicorn brain.app:app --host 0.0.0.0 --port 8000

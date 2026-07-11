@@ -11,6 +11,10 @@ from faster_whisper import WhisperModel
 
 # 'base' is multilingual (EN + DE) and small enough to feel Pi-like on CPU.
 _MODEL_NAME = os.environ.get("WHISPER_MODEL", "base")
+# Pin transcription threads to the CPU quota, exactly as the LLM does. Otherwise
+# faster-whisper sees ALL host cores and spawns that many threads, which then
+# fight the container's CFS throttle instead of mirroring the Pi's 4 cores.
+_CPU_THREADS = int(os.environ.get("COMPANION_NUM_THREAD", "4"))
 
 _model: WhisperModel | None = None
 
@@ -18,7 +22,9 @@ _model: WhisperModel | None = None
 def _get_model() -> WhisperModel:
     global _model
     if _model is None:
-        _model = WhisperModel(_MODEL_NAME, device="cpu", compute_type="int8")
+        _model = WhisperModel(
+            _MODEL_NAME, device="cpu", compute_type="int8", cpu_threads=_CPU_THREADS
+        )
     return _model
 
 
