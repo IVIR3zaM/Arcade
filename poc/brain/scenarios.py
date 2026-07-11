@@ -25,39 +25,39 @@ GAMES: list[GameInfo] = [
 # Demo play history + remaining screen time today, keyed by lowercased name. The
 # analytics functions read these; new people the assistant creates have neither.
 HISTORIES: dict[str, list[SessionRecord]] = {
-    "leo": [
+    "kian": [
         SessionRecord("Track & Field", "sports", 20),
         SessionRecord("Track & Field", "sports", 25),
-        SessionRecord("Pong", "sports", 10, co_players=["Mia"]),
+        SessionRecord("Pong", "sports", 10, co_players=["Nika"]),
         SessionRecord("River Raid", "shooter", 30),
-        SessionRecord("Contra", "shooter", 25, co_players=["Mia"]),
+        SessionRecord("Contra", "shooter", 25, co_players=["Nika"]),
     ],
-    "mia": [
+    "nika": [
         SessionRecord("Tetris", "puzzle", 15),
         SessionRecord("Super Mario World", "platformer", 20),
-        SessionRecord("Pong", "sports", 10, co_players=["Leo"]),
+        SessionRecord("Pong", "sports", 10, co_players=["Kian"]),
     ],
 }
 
 BUDGETS: dict[str, int] = {
-    "leo": 45,
-    "mia": 10,
+    "kian": 45,
+    "nika": 10,
 }
 
 # What the camera "sees" for each scenario: known names, or "unknown" for a new
 # face (a guest). Pick one from the CLI.
 SCENARIOS: dict[str, dict] = {
-    "leo-solo": {
-        "description": "Leo (English) walks up alone — loves sports, drifting to shooters.",
-        "present": ["Leo"],
+    "kian-solo": {
+        "description": "Kian (English) walks up alone — loves sports, drifting to shooters.",
+        "present": ["Kian"],
     },
-    "mia-solo": {
-        "description": "Mia (German) walks up alone — only 10 min of screen time left.",
-        "present": ["Mia"],
+    "nika-solo": {
+        "description": "Nika (English) walks up alone — only 10 min of screen time left.",
+        "present": ["Nika"],
     },
-    "leo-and-mia": {
-        "description": "Leo and Mia arrive together — two players.",
-        "present": ["Leo", "Mia"],
+    "kian-and-nika": {
+        "description": "Nika and Kian arrive together — two players.",
+        "present": ["Nika", "Kian"],
     },
     "guest": {
         "description": "An unrecognized face — the assistant can offer to save a profile.",

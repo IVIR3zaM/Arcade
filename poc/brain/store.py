@@ -18,8 +18,8 @@ DB_PATH = os.environ.get("ARCADE_DB", "/data/arcade.db")
 # Known family seeded on first init. Guests/new people are created at runtime by
 # the assistant via create_profile.
 _SEED = [
-    {"name": "Leo", "language": "en", "is_admin": 0},
-    {"name": "Mia", "language": "de", "is_admin": 0},
+    {"name": "Kian", "language": "en", "is_admin": 0},
+    {"name": "Nika", "language": "en", "is_admin": 0},
     {"name": "Reza", "language": "en", "is_admin": 1},  # the admin (privacy controls)
 ]
 

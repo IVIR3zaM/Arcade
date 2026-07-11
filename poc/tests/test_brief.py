@@ -14,8 +14,8 @@ from brain.brief import (
 )
 from brain.models import GameInfo, Profile, SessionRecord
 
-LEO = Profile(id="leo", name="Leo", language="en")
-MIA = Profile(id="mia", name="Mia", language="de")
+LEO = Profile(id="kian", name="Kian", language="en")
+MIA = Profile(id="nika", name="Nika", language="de")
 GUEST = Profile(id="guest-1", name=None, language="en", is_guest=True)
 
 GAMES = [
@@ -28,7 +28,7 @@ LEO_HISTORY = [
     SessionRecord("Track & Field", "sports", 20),
     SessionRecord("Track & Field", "sports", 25),
     SessionRecord("River Raid", "shooter", 30),
-    SessionRecord("Contra", "shooter", 25, co_players=["Mia"]),
+    SessionRecord("Contra", "shooter", 25, co_players=["Nika"]),
 ]
 
 
@@ -53,32 +53,32 @@ def test_prefers_multiplayer_threshold():
     solo = [SessionRecord("Tetris", "puzzle", 10)]
     assert prefers_multiplayer(solo) is False
     mixed = [
-        SessionRecord("Pong", "sports", 10, co_players=["Mia"]),
-        SessionRecord("Contra", "shooter", 10, co_players=["Mia"]),
+        SessionRecord("Pong", "sports", 10, co_players=["Nika"]),
+        SessionRecord("Contra", "shooter", 10, co_players=["Nika"]),
     ]
     assert prefers_multiplayer(mixed) is True
 
 
 def test_favorite_partner():
-    assert favorite_partner(LEO_HISTORY) == "Mia"
+    assert favorite_partner(LEO_HISTORY) == "Nika"
 
 
 def test_suggest_favorite_when_time_is_plentiful():
-    game = suggest_game([LEO], {"leo": LEO_HISTORY}, {"leo": 45}, GAMES)
+    game = suggest_game([LEO], {"kian": LEO_HISTORY}, {"kian": 45}, GAMES)
     assert game.title == "Track & Field"
 
 
 def test_suggest_quick_game_when_time_is_low():
-    game = suggest_game([LEO], {"leo": LEO_HISTORY}, {"leo": 10}, GAMES)
+    game = suggest_game([LEO], {"kian": LEO_HISTORY}, {"kian": 10}, GAMES)
     assert game.quick is True
 
 
 def test_suggest_nothing_when_time_is_up():
-    assert suggest_game([LEO], {"leo": LEO_HISTORY}, {"leo": 0}, GAMES) is None
+    assert suggest_game([LEO], {"kian": LEO_HISTORY}, {"kian": 0}, GAMES) is None
 
 
 def test_suggest_multiplayer_for_two_players():
-    game = suggest_game([LEO, MIA], {}, {"leo": 45, "mia": 30}, GAMES)
+    game = suggest_game([LEO, MIA], {}, {"kian": 45, "nika": 30}, GAMES)
     assert game.max_players >= 2
 
 

@@ -15,9 +15,9 @@ def _db():
 def test_init_seeds_known_family_including_admin():
     conn = _db()
     names = store.list_profile_names(conn)
-    assert {"Leo", "Mia", "Reza"} <= set(names)
+    assert {"Kian", "Nika", "Reza"} <= set(names)
     assert store.get_profile(conn, "reza")["is_admin"] == 1
-    assert store.get_profile(conn, "leo")["is_admin"] == 0
+    assert store.get_profile(conn, "kian")["is_admin"] == 0
 
 
 def test_create_and_delete_profile():
@@ -30,9 +30,9 @@ def test_create_and_delete_profile():
 
 def test_append_note_accumulates_memory():
     conn = _db()
-    store.append_note(conn, "Leo", "only plays after 5pm")
-    store.append_note(conn, "Leo", "prefers two-player games")
-    memory = store.get_profile(conn, "Leo")["notes"]
+    store.append_note(conn, "Kian", "only plays after 5pm")
+    store.append_note(conn, "Kian", "prefers two-player games")
+    memory = store.get_profile(conn, "Kian")["notes"]
     assert "after 5pm" in memory
     assert "two-player" in memory
 

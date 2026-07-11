@@ -29,7 +29,7 @@ def _chat_returning(payload):
 
 def test_classify_intent_parses_json():
     chat = _chat_returning({"intent": "play_game", "title": "Pong"})
-    intent = agent.classify_intent("let's play pong", ["Leo"], chat=chat)
+    intent = agent.classify_intent("let's play pong", ["Kian"], chat=chat)
     assert intent == {"intent": "play_game", "title": "Pong"}
 
 
@@ -37,7 +37,7 @@ def test_classify_intent_falls_back_on_bad_json():
     def chat(system, user, as_json=False):
         return "not json at all"
 
-    assert agent.classify_intent("???", ["Leo"], chat=chat)["intent"] == "other"
+    assert agent.classify_intent("???", ["Kian"], chat=chat)["intent"] == "other"
 
 
 # --- execute_intent (pure, no model) ---------------------------------------
@@ -45,7 +45,7 @@ def test_classify_intent_falls_back_on_bad_json():
 
 def test_execute_play_game_with_side_launches_and_assigns_joystick():
     kind, data, actions = agent.execute_intent(
-        _session(["Leo"]), {"intent": "play_game", "title": "Point", "side": "left"}
+        _session(["Kian"]), {"intent": "play_game", "title": "Point", "side": "left"}
     )
     assert kind == "played"
     assert data["launched"] == "Pong"  # fuzzy-corrected in code
@@ -56,7 +56,7 @@ def test_execute_play_game_with_side_launches_and_assigns_joystick():
 def test_execute_play_game_without_side_asks_which_joystick():
     # Single player, no side spoken → the game starts but Arc ASKS instead of
     # silently assuming "left".
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     kind, data, actions = agent.execute_intent(
         sess, {"intent": "play_game", "title": "Pong"}
     )
@@ -69,17 +69,17 @@ def test_execute_play_game_without_side_asks_which_joystick():
 
 def test_two_players_get_positional_joysticks_without_asking():
     kind, data, _actions = agent.execute_intent(
-        _session(["Leo", "Mia"]), {"intent": "play_game", "title": "Pong"}
+        _session(["Kian", "Nika"]), {"intent": "play_game", "title": "Pong"}
     )
     assert kind == "played"
-    assert data["joystick"] == "left"  # the speaker (Leo) is first in line
+    assert data["joystick"] == "left"  # the speaker (Kian) is first in line
 
 
 def test_pending_joystick_answer_assigns_the_side():
     def boom(system, user, as_json=False):
         raise AssertionError("a side answer must not need the model")
 
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     sess.running_game = "Pong"
     text, _actions, kind = agent.handle_turn(
         sess, "The right one, please.", "en", chat=boom, pending="joystick"
@@ -91,7 +91,7 @@ def test_pending_joystick_answer_assigns_the_side():
 def test_execute_privacy_is_admin_gated_in_code():
     # Non-admin present: code denies before any tool runs.
     kind, data, actions = agent.execute_intent(
-        _session(["Leo"]), {"intent": "set_privacy", "start": "20:00", "end": "09:00"}
+        _session(["Kian"]), {"intent": "set_privacy", "start": "20:00", "end": "09:00"}
     )
     assert kind == "access_denied"
     assert actions == []  # nothing executed
@@ -107,19 +107,19 @@ def test_execute_privacy_is_admin_gated_in_code():
 
 def test_execute_delete_other_profile_requires_admin():
     kind, _data, actions = agent.execute_intent(
-        _session(["Leo"]), {"intent": "delete_profile", "name": "Mia"}
+        _session(["Kian"]), {"intent": "delete_profile", "name": "Nika"}
     )
     assert kind == "access_denied"
-    assert store.get_profile(_session(["Leo"]).conn, "Mia") is not None
+    assert store.get_profile(_session(["Kian"]).conn, "Nika") is not None
 
 
 def test_execute_remember_stores_for_the_speaker():
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     kind, _data, _actions = agent.execute_intent(
         sess, {"intent": "remember", "note": "only plays after 5pm"}
     )
     assert kind == "remembered"
-    assert "after 5pm" in store.get_profile(sess.conn, "Leo")["notes"]
+    assert "after 5pm" in store.get_profile(sess.conn, "Kian")["notes"]
 
 
 # --- orchestration ----------------------------------------------------------
@@ -132,7 +132,7 @@ def test_handle_turn_routes_then_uses_template_one_model_call():
         calls.append(as_json)
         return json.dumps({"intent": "play_game", "title": "Pong"})
 
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     text, actions, kind = agent.handle_turn(sess, "play pong", "en", chat=chat)
     assert "Pong" in text and "left or right" in text  # template asks for a side
     assert calls == [True]  # ONE model call per typical turn now
@@ -190,7 +190,7 @@ def test_goodbye_is_matched_fuzzily_in_code_without_the_model():
     # Whisper renders "Tschüss!" as "Schüsse" — still a goodbye.
     for heard in ("bye", "Tschüss!", "Schüsse.", "goodbye"):
         _text, _actions, kind = agent.handle_turn(
-            _session(["Leo"]), heard, "de", chat=boom
+            _session(["Kian"]), heard, "de", chat=boom
         )
         assert kind == "goodbye", heard
     assert not agent.is_goodbye("let's play pong")
@@ -263,19 +263,19 @@ def test_model_intent_outside_the_possibility_map_is_dropped():
     # Mid-game the model must not be able to delete a profile — that intent is
     # not on the menu it was given, so a stray one is coerced to "other".
     def chat(system, user, as_json=False):
-        return json.dumps({"intent": "delete_profile", "name": "Mia"})
+        return json.dumps({"intent": "delete_profile", "name": "Nika"})
 
     sess = _session(["Reza"])
     sess.running_game = "Pong"
     intent = agent.classify_intent(
-        "delete Mia", ["Reza"], chat=chat, allowed=agent.allowed_intents(sess)
+        "delete Nika", ["Reza"], chat=chat, allowed=agent.allowed_intents(sess)
     )
     assert intent["intent"] == "other"
 
     # With no game running, the same intent is allowed through.
     free = _session(["Reza"])
     intent = agent.classify_intent(
-        "delete Mia", ["Reza"], chat=chat, allowed=agent.allowed_intents(free)
+        "delete Nika", ["Reza"], chat=chat, allowed=agent.allowed_intents(free)
     )
     assert intent["intent"] == "delete_profile"
 
@@ -405,7 +405,7 @@ def test_launching_another_game_mid_game_asks_to_close_first():
     def chat(system, user, as_json=False):
         return json.dumps({"intent": "play_game", "title": "Tetris"})
 
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     sess.running_game = "Pong"
     text, actions, kind = agent.handle_turn(sess, "let's play Tetris", "en", chat=chat)
     assert kind == "confirm_close"
@@ -433,7 +433,7 @@ def test_declining_the_close_keeps_the_running_game():
     def boom(system, user, as_json=False):
         raise AssertionError("the confirmation must not need the model")
 
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     sess.running_game = "Pong"
     _text, _actions, kind = agent.handle_turn(
         sess,
@@ -465,7 +465,7 @@ def test_relaunching_the_same_running_game_does_not_ask_to_close():
     def chat(system, user, as_json=False):
         return json.dumps({"intent": "play_game", "title": "Pong"})
 
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     sess.running_game = "Pong"
     _text, _actions, kind = agent.handle_turn(sess, "play Pong", "en", chat=chat)
     assert kind != "confirm_close"
@@ -490,25 +490,25 @@ def test_existing_name_asks_to_merge_instead_of_duplicating():
         raise AssertionError("must not need the model")
 
     sess = _session(["unknown"])
-    # "Mia" is already a known profile.
+    # "Nika" is already a known profile.
     text, _actions, kind = agent.handle_turn(
-        sess, "My name is Mia.", "en", chat=boom, pending="name"
+        sess, "My name is Nika.", "en", chat=boom, pending="name"
     )
     assert kind == "profile_exists"
-    assert "Mia" in text
-    assert sess.pending_request == "merge:Mia"
+    assert "Nika" in text
+    assert sess.pending_request == "merge:Nika"
 
     # "Yes, that's me" → recognized as the existing person, no new profile.
     _text, _actions, kind = agent.handle_turn(
-        sess, "Yes!", "en", chat=boom, pending="merge:Mia"
+        sess, "Yes!", "en", chat=boom, pending="merge:Nika"
     )
     assert kind == "profile_merged"
-    assert sess.recognized_as == "Mia"
+    assert sess.recognized_as == "Nika"
 
     # "No" → ask for a different name instead.
     sess2 = _session(["unknown"])
     _text, _actions, kind = agent.handle_turn(
-        sess2, "no", "en", chat=boom, pending="merge:Mia"
+        sess2, "no", "en", chat=boom, pending="merge:Nika"
     )
     assert kind == "ask_other_name"
 
@@ -516,7 +516,7 @@ def test_existing_name_asks_to_merge_instead_of_duplicating():
 def test_context_reports_how_long_the_game_has_been_running():
     import time as _time
 
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     sess.running_game = "Pong"
     sess.game_started_at = _time.time() - 600  # 10 minutes ago
     kind, data, _ = agent.execute_intent(sess, {"intent": "get_context"})
@@ -612,13 +612,13 @@ def test_language_request_is_matched_in_code_without_the_model():
 
 def test_name_from_utterance():
     assert agent.name_from_utterance("save my profile, I'm Sam") == "Sam"
-    assert agent.name_from_utterance("Ich heiße Mia Weber, bitte") == "Mia Weber"
+    assert agent.name_from_utterance("Ich heiße Nika Weber, bitte") == "Nika Weber"
     assert agent.name_from_utterance("Erstell mir bitte ein Profil") is None
     assert agent.name_from_utterance("create a profile for me") is None
 
 
 def test_monitor_and_language_intents():
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     kind, data, _ = agent.execute_intent(sess, {"intent": "monitor", "on": False})
     assert (kind, data["monitor_on"]) == ("monitor_set", False)
 
@@ -627,7 +627,7 @@ def test_monitor_and_language_intents():
     )
     assert kind == "language_set"
     assert sess.new_language == "de"
-    assert store.get_profile(sess.conn, "Leo")["language"] == "de"  # persisted
+    assert store.get_profile(sess.conn, "Kian")["language"] == "de"  # persisted
 
 
 def test_templates_render_in_german_without_the_model():
@@ -644,8 +644,8 @@ def test_templates_render_in_german_without_the_model():
 def test_greet_loads_profile_then_phrases_once():
     def chat(system, user, as_json=False):
         assert as_json is False  # greeting never needs an intent call
-        return "Welcome back, Leo!"
+        return "Welcome back, Kian!"
 
-    text, actions = agent.greet(_session(["Leo"]), "en", chat=chat)
-    assert text == "Welcome back, Leo!"
+    text, actions = agent.greet(_session(["Kian"]), "en", chat=chat)
+    assert text == "Welcome back, Kian!"
     assert [a["tool"] for a in actions] == ["get_player", "recommend_game"]

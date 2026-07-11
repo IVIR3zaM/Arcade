@@ -139,6 +139,14 @@ intent prefill cache so even the first turn skips the few-shot. Most turns are a
 **pure code** (wake word, goodbye, yes/no, joystick side, language requests) and
 cost **zero** model calls.
 
+**Seeing where the time goes.** Every turn is timed step by step. The container
+log prints a live, indented timeline as the engine moves through each step
+(`▶ stt … ✓ stt 0.91s → ▶ handle → ▶ intent …`), and the CLI prints a one-line
+breakdown under each reply: `⏱ stt 0.9s · intent 1.3s · code 0.0s · phrase 0.0s ·
+tts 0.6s · total 2.9s` — `intent`/`phrase` are the model calls, `code` is the
+deterministic work. Set `ARC_TIMING=0` to silence the live log (the CLI numbers
+still show).
+
 **What the PoC found (read this).** A 3B model *cannot* be an autonomous
 many-tools agent — given one big prompt with a dozen tools it under-calls them and
 sometimes goes silent, and left to fill arguments freely it does things like
@@ -193,9 +201,9 @@ in the `pi_data` volume; `docker compose down -v` wipes them for a clean slate.
 
 ## Scenarios
 
-- **leo-solo** — Leo (English): greet + load his history/memory, suggest, launch.
-- **mia-solo** — Mia (German): greeted auf Deutsch.
-- **leo-and-mia** — two players: a joystick each.
+- **kian-solo** — Kian (English): greet + load his history/memory, suggest, launch.
+- **nika-solo** — Nika (German): greeted auf Deutsch.
+- **kian-and-nika** — two players: a joystick each.
 - **guest** — an unrecognized face (greeted **in German**, the default): try
   *"erstell mir ein Profil"* — Arc asks for your name, then remembers you.
 - **reza-admin** — Reza (admin): try "turn off the mic and camera every night

@@ -19,16 +19,20 @@ is opened per request because FastAPI serves sync endpoints across threads.
 """
 
 import base64
+import json
 import os
+import queue
 import re
 import tempfile
+import threading
 import time
 import uuid
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import agent, hardware, stt, store, tts, wake
+from . import agent, hardware, stt, store, timing, tts, wake
 from .scenarios import GAMES, SCENARIOS
 from .tools import Session, summarize
 
@@ -105,6 +109,7 @@ class Reply(BaseModel):
     attention: str = "engaged"
     ignored: bool = False
     done: bool = False
+    timings: list[dict] = []  # per-step durations for the turn (last is "total")
 
 
 def _speak(text: str, language: str) -> str:
@@ -134,7 +139,9 @@ def _language_for(present: list[str]) -> str:
     return "de"
 
 
-def _ignored(session_id: str, state: dict, user_text: str) -> Reply:
+def _ignored(
+    session_id: str, state: dict, user_text: str, timings: list[dict] | None = None
+) -> Reply:
     """Heard something but not addressed — stay silent (no TTS)."""
     return Reply(
         session_id=session_id,
@@ -145,7 +152,55 @@ def _ignored(session_id: str, state: dict, user_text: str) -> Reply:
         user_text=user_text,
         attention=state["attention"],
         ignored=True,
+        timings=timings or [],
     )
+
+
+def _reply_dict(reply: Reply) -> dict:
+    return reply.model_dump() if hasattr(reply, "model_dump") else reply.dict()
+
+
+def _stream_response(label: str, run) -> StreamingResponse:
+    """Run `run(tl)` in a worker thread and stream its step events as NDJSON, then
+    a final {"event":"reply", ...} carrying the whole Reply. The host reads the
+    stream to show a live 'what's happening now + seconds elapsed' counter, so a
+    slow step (STT, a model call) never looks like a silent freeze.
+
+    Each line is one JSON object:
+      {"event":"begin","step":"stt"}                 a step started
+      {"event":"end","step":"stt","seconds":0.91}    ...and finished
+      {"event":"total","seconds":2.86}               whole request done
+      {"event":"reply","reply":{...}}                 the full Reply payload
+    """
+    events: queue.Queue = queue.Queue()
+    tl = timing.Timeline(label, on_event=events.put)
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            box["reply"] = run(tl)
+        except Exception as exc:  # don't hang the stream on a bug — report it
+            box["error"] = repr(exc)
+        finally:
+            events.put(None)  # sentinel: work finished
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def body():
+        while True:
+            ev = events.get()
+            if ev is None:
+                break
+            yield json.dumps(ev) + "\n"
+        if "reply" in box:
+            yield (
+                json.dumps({"event": "reply", "reply": _reply_dict(box["reply"])})
+                + "\n"
+            )
+        else:
+            yield json.dumps({"event": "error", "message": box.get("error")}) + "\n"
+
+    return StreamingResponse(body(), media_type="application/x-ndjson")
 
 
 @app.get("/health")
@@ -160,8 +215,12 @@ def list_scenarios() -> list[dict]:
     ]
 
 
-@app.post("/session/start", response_model=Reply)
-def start(req: StartRequest) -> Reply:
+@app.post("/session/start")
+def start(req: StartRequest) -> StreamingResponse:
+    return _stream_response(f"greet {req.scenario_id}", lambda tl: _run_start(req, tl))
+
+
+def _run_start(req: StartRequest, tl: "timing.Timeline") -> Reply:
     scenario = SCENARIOS.get(req.scenario_id)
     if scenario is None:
         raise HTTPException(404, f"unknown scenario: {req.scenario_id}")
@@ -212,22 +271,33 @@ def start(req: StartRequest) -> Reply:
     ]
 
     sess = Session(conn=store.connect(), present=present)
-    text, greet_actions = agent.greet(sess, state["language"])
+    with tl.span("greet") as h:
+        text, greet_actions = agent.greet(
+            sess, state["language"], chat=timing.timed_chat(tl, agent._chat)
+        )
+    tl.record("code", h["elapsed"] - tl.model_seconds())
 
     state["running_game"] = sess.running_game
     state["last_suggested"] = sess.last_suggested
+    with tl.step("tts"):
+        audio = _speak(text, state["language"])
     return Reply(
         session_id=session_id,
         text=text,
-        audio_b64=_speak(text, state["language"]),
+        audio_b64=audio,
         language=state["language"],
         actions=actions + greet_actions,
         attention="engaged",
+        timings=tl.finish(),
     )
 
 
-@app.post("/turn", response_model=Reply)
-def turn(req: TurnRequest) -> Reply:
+@app.post("/turn")
+def turn(req: TurnRequest) -> StreamingResponse:
+    return _stream_response(f"turn {req.session_id[:6]}", lambda tl: _run_turn(req, tl))
+
+
+def _run_turn(req: TurnRequest, tl: "timing.Timeline") -> Reply:
     state = _SESSIONS.get(req.session_id)
     if state is None:
         raise HTTPException(404, "unknown session")
@@ -246,11 +316,12 @@ def turn(req: TurnRequest) -> Reply:
         # language=None → whisper auto-detects EN vs DE. Forcing the session
         # language made whisper mangle English speech into German gibberish,
         # so a guest (default de) could never ask to switch to English.
-        user_text, spoken_lang, lang_prob = stt.transcribe(
-            wav.name,
-            language=None,
-            initial_prompt=_whisper_prompt(state["present"]),
-        )
+        with tl.step("stt"):
+            user_text, spoken_lang, lang_prob = stt.transcribe(
+                wav.name,
+                language=None,
+                initial_prompt=_whisper_prompt(state["present"]),
+            )
     # Trust whisper's pick with decent confidence: it already DECODED the audio
     # in that language, so replying in the other one is always worse.
     detected = spoken_lang if spoken_lang in ("en", "de") and lang_prob >= 0.6 else None
@@ -262,7 +333,7 @@ def turn(req: TurnRequest) -> Reply:
         woke, rest = wake.split_wake(user_text)
         if not woke:
             # Players chatting with each other — none of Arc's business.
-            return _ignored(req.session_id, state, user_text)
+            return _ignored(req.session_id, state, user_text, tl.finish())
 
     if not state["present"]:
         # "Hey Arc" heard, but the camera sees nobody at the cabinet — invite
@@ -279,14 +350,17 @@ def turn(req: TurnRequest) -> Reply:
         # "Hey Arc"; invite them over in the cabinet's current language.
         lang = state["language"]
         text = agent.phrase("come_over", {}, lang)
+        with tl.step("tts"):
+            audio = _speak(text, lang)
         return Reply(
             session_id=req.session_id,
             text=text,
-            audio_b64=_speak(text, lang),
+            audio_b64=audio,
             language=lang,
             actions=actions,
             user_text=user_text,
             attention="idle",
+            timings=tl.finish(),
         )
 
     # Arc answers in the language the person is actually SPEAKING (German default
@@ -321,19 +395,22 @@ def turn(req: TurnRequest) -> Reply:
         if not rest.strip():
             # Just "Hey Arc" — acknowledge and listen.
             text = agent.phrase("wake_ack", {}, state["language"])
+            with tl.step("tts"):
+                audio = _speak(text, state["language"])
             return Reply(
                 session_id=req.session_id,
                 text=text,
-                audio_b64=_speak(text, state["language"]),
+                audio_b64=audio,
                 language=state["language"],
                 actions=actions,
                 user_text=user_text,
                 attention="engaged",
+                timings=tl.finish(),
             )
         user_text = rest
 
     if _is_junk(user_text):
-        return _ignored(req.session_id, state, user_text)
+        return _ignored(req.session_id, state, user_text, tl.finish())
 
     if spoken_lang not in ("en", "de") and lang_prob >= 0.6:
         # They spoke a language Arc doesn't have (e.g. Farsi) — the transcript
@@ -347,14 +424,17 @@ def turn(req: TurnRequest) -> Reply:
         )
         state["last_activity"] = now
         text = agent.phrase("language_unsupported", {}, state["language"])
+        with tl.step("tts"):
+            audio = _speak(text, state["language"])
         return Reply(
             session_id=req.session_id,
             text=text,
-            audio_b64=_speak(text, state["language"]),
+            audio_b64=audio,
             language=state["language"],
             actions=actions,
             user_text=user_text,
             attention=state["attention"],
+            timings=tl.finish(),
         )
 
     sess = Session(
@@ -365,9 +445,18 @@ def turn(req: TurnRequest) -> Reply:
         rejected=list(state.get("rejected") or []),
         game_started_at=state.get("game_started_at"),
     )
-    text, turn_actions, kind = agent.handle_turn(
-        sess, user_text, state["language"], pending=state["pending"]
-    )
+    # handle_turn wraps route → execute → phrase. The model calls inside it are
+    # timed individually (via timed_chat, logged as "intent"/"phrase"); the rest
+    # of its wall time is deterministic code, recorded as "code".
+    with tl.span("handle") as h:
+        text, turn_actions, kind = agent.handle_turn(
+            sess,
+            user_text,
+            state["language"],
+            chat=timing.timed_chat(tl, agent._chat),
+            pending=state["pending"],
+        )
+    tl.record("code", h["elapsed"] - tl.model_seconds())
     actions.extend(turn_actions)
 
     state["running_game"] = sess.running_game
@@ -429,15 +518,18 @@ def turn(req: TurnRequest) -> Reply:
         ]
 
     done = kind == "goodbye"
+    with tl.step("tts"):
+        audio = _speak(text, state["language"])
     return Reply(
         session_id=req.session_id,
         text=text,
-        audio_b64=_speak(text, state["language"]),
+        audio_b64=audio,
         language=state["language"],
         actions=actions,
         user_text=user_text,
         attention=state["attention"],
         done=done,
+        timings=tl.finish(),
     )
 
 

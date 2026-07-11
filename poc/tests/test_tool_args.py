@@ -14,18 +14,18 @@ def _session(present):
 
 
 def test_get_player_accepts_player_key():
-    # Model passed {"player": "Leo"} to get_player which really wants "name".
-    result = tools.run_tool(_session(["Leo"]), "get_player", {"player": "Leo"})
+    # Model passed {"player": "Kian"} to get_player which really wants "name".
+    result = tools.run_tool(_session(["Kian"]), "get_player", {"player": "Kian"})
     assert result["known"] is True
-    assert result["name"] == "Leo"
+    assert result["name"] == "Kian"
 
 
 def test_launch_game_accepts_game_key():
-    result = tools.run_tool(_session(["Leo"]), "launch_game", {"game": "Pong"})
+    result = tools.run_tool(_session(["Kian"]), "launch_game", {"game": "Pong"})
     assert result["launched"] == "Pong"
 
 
 def test_remember_accepts_person_key():
-    sess = _session(["Leo"])
-    tools.run_tool(sess, "remember", {"person": "Leo", "note": "likes racing"})
-    assert "racing" in store.get_profile(sess.conn, "Leo")["notes"]
+    sess = _session(["Kian"])
+    tools.run_tool(sess, "remember", {"person": "Kian", "note": "likes racing"})
+    assert "racing" in store.get_profile(sess.conn, "Kian")["notes"]

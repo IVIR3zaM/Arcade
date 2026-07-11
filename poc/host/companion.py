@@ -17,11 +17,13 @@ answer. While you're silent, the CLI polls /tick so the cabinet's own housekeepi
 
 import base64
 import io
+import json
 import os
 import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import wave
 
@@ -150,6 +152,78 @@ def _print_actions(actions: list) -> None:
         print(f"   ⚙  {a['tool']}({args}) → {a['summary']}")
 
 
+def _print_timings(timings: list) -> None:
+    """Show how long each pipeline step took (stt · intent · code · phrase · tts)."""
+    if not timings:
+        return
+    parts = " · ".join(f"{t['step']} {t['seconds']:.2f}s" for t in timings)
+    print(f"   ⏱  {parts}")
+
+
+# Friendly labels for the live counter — say what the engine is actually doing.
+_STEP_LABEL = {
+    "stt": "transcribing speech",
+    "intent": "understanding you (LLM)",
+    "phrase": "wording the reply (LLM)",
+    "code": "deciding what to do",
+    "tts": "speaking",
+    "greet": "greeting you",
+}
+
+
+def _post_stream(url: str, payload: dict) -> dict:
+    """POST to a streaming (NDJSON) endpoint and show a LIVE ticking counter for
+    whatever step the engine is on right now, then return the final reply dict.
+
+    The brain emits {"event":"begin"/"end"/"total"/"reply"} lines as it works; a
+    background thread reprints the current step's elapsed seconds ~10x/sec so a
+    slow step shows a rising counter instead of a silent wait."""
+    resp = requests.post(url, json=payload, stream=True, timeout=300)
+    cur = {"step": None, "t0": 0.0}
+    stop = threading.Event()
+
+    def tick() -> None:
+        while not stop.is_set():
+            step = cur["step"]
+            if step:
+                label = _STEP_LABEL.get(step, step)
+                elapsed = time.time() - cur["t0"]
+                sys.stdout.write(f"\r   ⏳ {label}… {elapsed:5.1f}s ")
+                sys.stdout.flush()
+            stop.wait(0.1)
+
+    ticker = threading.Thread(target=tick, daemon=True)
+    ticker.start()
+    reply: dict = {}
+    try:
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            ev = json.loads(line)
+            kind = ev.get("event")
+            if kind == "begin":
+                cur["step"] = ev["step"]
+                cur["t0"] = time.time()
+            elif kind == "end":
+                cur["step"] = None
+                label = _STEP_LABEL.get(ev["step"], ev["step"])
+                # Overwrite the ticking line with the finished step + final time.
+                sys.stdout.write(
+                    f"\r   ✓ {label}  {ev['seconds']:.2f}s".ljust(48) + "\n"
+                )
+                sys.stdout.flush()
+            elif kind == "total":
+                cur["step"] = None
+            elif kind == "reply":
+                reply = ev["reply"]
+            elif kind == "error":
+                reply = {"error": ev.get("message")}
+    finally:
+        stop.set()
+        ticker.join(timeout=0.3)
+    return reply
+
+
 def _status(attention: str) -> None:
     if attention == "idle":
         print("  🎧 (idle — say “Hey Arc” to get my attention)")
@@ -174,12 +248,12 @@ def main() -> None:
     scenario_id = _choose_scenario()
 
     print("\n(Walking up to the cabinet — the camera spots you...)\n")
-    reply = requests.post(
-        f"{BRAIN_URL}/session/start",
-        json={"scenario_id": scenario_id},
-        timeout=300,
-    ).json()
+    reply = _post_stream(f"{BRAIN_URL}/session/start", {"scenario_id": scenario_id})
+    if "error" in reply:
+        print(f"  ⚠ brain error: {reply['error']}")
+        return
     _print_actions(reply["actions"])
+    _print_timings(reply.get("timings"))
     if reply["text"]:
         print(f"🕹  Arc: {reply['text']}\n")
         _play(reply["audio_b64"])
@@ -209,18 +283,22 @@ def main() -> None:
         if audio_b64 is None:
             continue
         print("  (heard something — thinking...)")
-        reply = requests.post(
+        reply = _post_stream(
             f"{BRAIN_URL}/turn",
-            json={"session_id": session_id, "audio_b64": audio_b64},
-            timeout=300,
-        ).json()
+            {"session_id": session_id, "audio_b64": audio_b64},
+        )
+        if "error" in reply:
+            print(f"  ⚠ brain error: {reply['error']}")
+            continue
         attention = reply.get("attention", attention)
         if reply.get("ignored"):
             print(f"  🙈 (not for me: “{reply.get('user_text', '')}” — staying quiet)")
+            _print_timings(reply.get("timings"))
             _status(attention)
             continue
         print(f"\n🗣  You: {reply.get('user_text', '')}")
         _print_actions(reply["actions"])
+        _print_timings(reply.get("timings"))
         print(f"🕹  Arc: {reply['text']}\n")
         _play(reply["audio_b64"])
         if reply.get("done"):

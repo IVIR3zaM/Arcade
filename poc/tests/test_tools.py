@@ -16,21 +16,21 @@ def _session(present):
 
 def test_launch_game_fuzzy_matches_misheard_title():
     # The exact bug the user hit: "Point" should become "Pong", not a made-up game.
-    result = tools.launch_game(_session(["Leo"]), "Point")
+    result = tools.launch_game(_session(["Kian"]), "Point")
     assert result["launched"] == "Pong"
     assert result["requested"] == "Point"
 
 
 def test_launch_game_rejects_unknown_title_with_suggestions():
-    result = tools.launch_game(_session(["Leo"]), "Zelda Rocket Zoom")
+    result = tools.launch_game(_session(["Kian"]), "Zelda Rocket Zoom")
     assert "error" in result
     assert result["did_you_mean"]
 
 
 def test_get_player_returns_profile_and_memory():
-    sess = _session(["Leo"])
-    store.append_note(sess.conn, "Leo", "loves sports")
-    result = tools.get_player(sess, "Leo")
+    sess = _session(["Kian"])
+    store.append_note(sess.conn, "Kian", "loves sports")
+    result = tools.get_player(sess, "Kian")
     assert result["known"] is True
     assert result["favorite_game"] == "Track & Field"
     assert "loves sports" in result["memory"]
@@ -43,15 +43,15 @@ def test_get_player_marks_unknown_face_as_guest():
 
 
 def test_assign_joystick_two_players_left_and_right():
-    sess = _session(["Leo", "Mia"])
-    assert tools.assign_joystick(sess, "Leo")["joystick"] == "left"
-    assert tools.assign_joystick(sess, "Mia")["joystick"] == "right"
+    sess = _session(["Kian", "Nika"])
+    assert tools.assign_joystick(sess, "Kian")["joystick"] == "left"
+    assert tools.assign_joystick(sess, "Nika")["joystick"] == "right"
 
 
 def test_remember_persists_a_learned_preference():
-    sess = _session(["Leo"])
-    tools.remember(sess, "Leo", "only plays evenings after 5pm")
-    assert "after 5pm" in store.get_profile(sess.conn, "Leo")["notes"]
+    sess = _session(["Kian"])
+    tools.remember(sess, "Kian", "only plays evenings after 5pm")
+    assert "after 5pm" in store.get_profile(sess.conn, "Kian")["notes"]
 
 
 def test_create_then_delete_profile():
@@ -63,7 +63,7 @@ def test_create_then_delete_profile():
 
 def test_set_privacy_schedule_requires_admin_present():
     # Non-admin present -> refused.
-    denied = tools.set_privacy_schedule(_session(["Leo"]), "20:00", "09:00", "night")
+    denied = tools.set_privacy_schedule(_session(["Kian"]), "20:00", "09:00", "night")
     assert "error" in denied
     # Admin (Reza) present -> allowed and stored.
     sess = _session(["Reza"])
@@ -73,11 +73,11 @@ def test_set_privacy_schedule_requires_admin_present():
 
 
 def test_close_game_only_when_running():
-    sess = _session(["Leo"])
+    sess = _session(["Kian"])
     assert "error" in tools.close_game(sess)
     tools.launch_game(sess, "Pong")
     assert tools.close_game(sess)["closed"] == "Pong"
 
 
 def test_run_tool_unknown_name_returns_error():
-    assert "error" in tools.run_tool(_session(["Leo"]), "make_coffee", {})
+    assert "error" in tools.run_tool(_session(["Kian"]), "make_coffee", {})
