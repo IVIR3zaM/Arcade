@@ -20,6 +20,12 @@ tested** — locally in Docker for now. Don't start a later phase until the curr
 one runs. Follow [AGENTS.md](AGENTS.md) throughout — TDD, KISS/YAGNI, keep the
 stack.
 
+Second guiding rule: **the cabinet is fully functional with no internet, and
+never downloads anything at boot or at runtime.** Every dependency — packages,
+emulator cores, AI models, voices — is installed once at **provisioning/image-
+build time**. Fetch-on-first-run is acceptable only in dev conveniences (the
+Docker stand-ins, the PoC), never on the Pi.
+
 **Phases 0–7 are the arcade** — that's the whole core project. **Phase 8 is a
 separate, optional, on-device AI companion** (voice + camera) built on top of the
 finished arcade; it is all-local (no cloud) and strictly additive. Don't start it
@@ -257,10 +263,10 @@ art with the stick/gamepad and play — the core project goal.
 
 A voice + camera assistant layer built **on top of the finished arcade** (Phases
 0–7). It recognizes who is at the cabinet, greets them **by name in their
-language (English or German, English default)**, knows their play history and how
-much time they have today, suggests a game, tells them **which joystick to use**,
-and logs every session. It includes a **guest / party mode** with consented,
-locally-stored, deletable profiles.
+language (English default; German is the backup for kids who can't speak English
+yet)**, knows their play history and how much time they have today, suggests a
+game, tells them **which joystick to use**, and logs every session. It includes a
+**guest / party mode** with consented, locally-stored, deletable profiles.
 
 **This phase is strictly additive and opt-in.** The arcade must keep working with
 none of it. It is built the same way as everything else — **iteratively, TDD,
@@ -270,6 +276,13 @@ Phase-7-style hardware checkpoints collected in **8.9**.
 **Everything is on-device. Nothing ever leaves the Pi — no cloud.** This is the
 core constraint that keeps the whole thing GDPR-simple (household, local-only),
 and it is deliberate: we evaluated and **rejected** any cloud LLM / offload path.
+
+**And nothing ever comes down to the Pi either: fully offline, no downloads at
+boot or runtime.** The LLM weights, whisper model, and Piper voices are all
+installed at provisioning time (baked into the image or copied once during
+setup). The PoC's first-run fetch from the Ollama registry / Hugging Face was a
+dev convenience only — the production companion must start and run with the
+network cable unplugged.
 
 ### Hardware this phase adds (all optional to the arcade)
 
@@ -283,20 +296,129 @@ and it is deliberate: we evaluated and **rejected** any cloud LLM / offload path
 - **Active cooling** — sustained LLM inference is a new 100%-CPU heat source on a
   Pi that already runs hot; the temperature watchdog (Phase 3) still guards it.
 
+### 8.0 — Experience PoC ✅ (done) — and the lessons that now bind this phase
+
+- [x] `[x]` A throwaway PoC (`poc/`) proved the full experience end-to-end on a
+  Pi-approximating throttled container: continuous listening (VAD, no
+  push-to-talk), wake word, greeting, fuzzy game launch, joystick assignment,
+  profiles/memory in SQLite, guest onboarding, admin privacy scheduling, EN/DE —
+  at **~2–4 s for a typical turn**.
+
+**The PoC code is throwaway and stays in `poc/`.** It grew by iteration into
+shallow, monolithic modules (a 1,400-line `agent.py`); none of it is ported. The
+production companion is a **clean rewrite** with a simpler, layered structure
+(see 8.3/8.6): a pure conversation engine with no I/O, thin adapters (audio,
+vision, model, hardware) at the edges, and one orchestrator. What we keep are
+the findings below — each one was paid for in latency or a live misbehavior, and
+the sub-phases reference them.
+
+**What a 3B model on a Pi-class CPU can and can't do**
+
+1. It **cannot** be an autonomous many-tools agent: given one big prompt with a
+   dozen tools it under-calls them, goes silent, and fills arguments with junk
+   (`create_profile(name="me")`, `name="unspecified"`). Split honestly, it works:
+   the model **only classifies intent** (schema-constrained JSON — it physically
+   can't answer in prose or invent an intent) and **only phrases the open-ended
+   moments** (a greeting that weaves in remembered detail, free-form context
+   answers). Everything else — execution, access control, argument sanity — is
+   deterministic code. *Yes for understanding; no for anything you can't afford
+   it getting wrong.*
+2. A typical turn must cost **at most one model call**. Routine outcomes
+   (launched, stopped, remembered, denied, …) get hand-written EN/DE templates —
+   zero model calls. Templating replies halved latency with no felt loss.
+3. The perf disciplines, each measured: pin `num_thread` to the real core count
+   (unpinned, Ollama fights the CPU quota — ~4× slower); keep the model resident
+   (`keep_alive -1`); keep the intent **system prompt constant** so llama.cpp
+   reuses its prefill cache (all few-shot lives there; only the short user line
+   is processed per turn) and **prime that cache at boot**; keep `num_ctx` /
+   `num_predict` small. Fewer model calls beats faster model calls.
+
+**Language — hard decisions, already made**
+
+4. The cabinet speaks **English and German, and only those**. Persian was tried
+   and **dropped** — whisper-tiny mangles it and there is no usable voice; any
+   other language gets an honest "I can speak English and German", never a fake
+   "switch".
+5. **Never free auto-detect.** Letting whisper pick from ~99 languages was the
+   worst latency spike seen: garbled speech locked onto Arabic/Polish and burned
+   6–9 s decoding hallucinated text. Run a cheap detection pass, **clamp to the
+   better of EN vs DE**, then decode. Once the language is settled, **lock it**
+   and skip detection entirely (~0.5 s saved per turn).
+6. The reply language only flips on **genuine spoken content** (≥2 real words) —
+   never on the wake phrase alone ("Hey Arc" reads as English to whisper) or a
+   one-word "okay". Explicit requests ("speak English" / "sprich Deutsch") are
+   matched **in code**, not by the model, and persist to the profile.
+7. **Default is English** (a deliberate reversal of the PoC's German default);
+   known profiles get their saved language.
+
+**Latency & perceived responsiveness**
+
+8. STT: whisper **tiny** int8, `beam_size=1`, threads pinned like the LLM, and an
+   `initial_prompt` biasing decoding toward the wake phrase, the game titles, and
+   the known people's names — that bias buys back most of tiny's accuracy loss.
+9. TTS: keep the Piper voices **resident in-process** (the CLI respawn +
+   ONNX reload per reply was a big fixed cost), **warm them up at startup**, and
+   **cache synthesized audio by (language, text)** — templated lines are then
+   instant on reuse.
+10. **Time every step and stream progress** (step began / step finished events):
+    a 3-second silent gap feels broken; the same gap with a visible "processing"
+    state doesn't. This instrumentation feeds the status bar (8.8).
+
+**The conversation — code owns the flow**
+
+11. High-frequency turns are matched **in code, fuzzily, at zero model calls**,
+    because whisper mishears everything: wake word ("Hey Ark/Arg/Hallo Arc"),
+    goodbye ("Tschüss" → "Schüsse"), acceptance ("let's go for that"), cancel,
+    joystick sides ("Ride"/"Wright" = right), stop-the-game ("Kilo's the game"),
+    language requests, and letter-by-letter spelled names ("K-I-A-N").
+12. **Attention state machine:** *engaged* after a greeting or wake word — every
+    utterance handled; *idle* after ~45 s of silence or while a game runs —
+    everything transcribed but ignored unless it starts with the wake phrase, so
+    players talking to each other never trigger the companion. Mid-game it
+    answers one woken request and goes right back to ignoring chatter — and it
+    **says so** ("Say 'Hey Arc' when you need me"); going silent unannounced
+    reads as a bug. The mic is closed while the companion speaks.
+13. Filter whisper's silence hallucinations ("Thanks for watching",
+    "Untertitelung des ZDF") before they reach the engine.
+14. **Pending-question state:** when the companion asked something ("what's your
+    name?", "which joystick?", "restart on the left?", "is that you?", "close
+    the game first?"), the next utterance is interpreted as the answer in code —
+    no model call, and an unclear reply doesn't withdraw the question.
+15. **Suggestion memory:** track the last offer and every rejection; never
+    re-offer a declined game; accepting an offer **launches** it (not
+    re-recommends it); saying a game's full title IS choosing it, even when the
+    model labels the turn as browsing.
+16. **Possibility map:** which intents are legal depends on cabinet state — a
+    running game owns the screen and joysticks, so launching another game,
+    remapping a joystick, screen-off, and privacy changes are impossible until
+    it's closed, and the companion asks first. The map both steers the model
+    (only doable intents are offered) and is enforced in code (the model
+    reaching past it is coerced to "unclear").
+17. **Never trust the model with names or permissions.** Names are extracted in
+    code from explicit cues only, guarded against pronouns, stopwords, and
+    schema-placeholder junk — when unsure, ask. Access control (admin gating,
+    who may delete whose profile) lives only in code; a duplicate name triggers
+    an "is that you?" merge flow instead of overwriting.
+
 ### The golden rule (design constraint for the whole phase)
 
-**Deterministic code owns the facts; the LLM owns only language.** SQLite +
-plain Python decide *what is true* (who is present, play history, trends, time
-budgets, turn order). The local LLM only turns a compact structured summary into
-a friendly spoken sentence in EN/DE. A small on-device model cannot be trusted to
-reason over raw logs or schedule turns — so it never does.
+**Deterministic code owns the facts and the flow; the LLM owns only
+understanding and open-ended wording.** SQLite + plain Python decide *what is
+true* (who is present, play history, budgets, turn order) and *what happens*
+(execution, access control, state). The model's whole job is: (a) one
+schema-constrained intent classification per non-trivial turn, and (b) phrasing
+the few genuinely open-ended replies. Validated by the PoC (8.0.1).
 
 - **Vision:** Hailo face detect + ArcFace embeddings; the Pi does a trivial
-  nearest-neighbour match against local profiles. Handles multiple faces at once.
-- **STT:** `whisper.cpp` (multilingual, EN + DE).
-- **TTS:** Piper (fast, has EN + DE voices).
-- **LLM:** a small 4-bit model (Qwen2.5-3B / Gemma-3-4B) via Ollama/llama.cpp,
-  used only as the narrator over a structured "brief".
+  nearest-neighbour match against local profiles. Handles multiple faces at
+  once — and its output (who is on which side) feeds the status bar (8.8), not
+  the LLM.
+- **STT:** whisper-family, `tiny` int8 (faster-whisper proved out; whisper.cpp
+  acceptable if it fits the Pi image better), **clamped to EN/DE** (8.0.5).
+- **TTS:** Piper, resident + cached (8.0.9), with **two matched male voices**
+  (8.4).
+- **LLM:** Qwen2.5-3B 4-bit via Ollama, resident, intent + open phrasing only
+  (validated in the PoC; 7B remains a quality/latency knob).
 
 ### Privacy constraints (hard rules, tested)
 
@@ -308,76 +430,131 @@ reason over raw logs or schedule turns — so it never does.
 
 ### 8.1 — Profiles & session logging (pure data, no hardware)
 
-- [ ] `[ ]` `profiles` table: id, name, language pref (EN/DE), is_guest, consent,
-  created_at, expires_at (nullable). *Test first, temp SQLite.*
+- [ ] `[ ]` `profiles` table: id, name, language pref (EN/DE, **default en**),
+  is_guest, is_admin, consent, created_at, expires_at (nullable). *Test first,
+  temp SQLite.*
+- [ ] `[ ]` `notes` (remembered facts): profile_id, note, created_at — the
+  "remember I only play after 5pm" store the PoC proved people actually use.
+  *Test first.*
 - [ ] `[ ]` `sessions` table: profile_id, game_id, started, ended, duration,
-  co_players. *Test first.*
-- [ ] `[ ]` Pure analytics over history: `favorite_game`, `recent_trend(window)`
-  (e.g. "sports → shooter"), `prefers_multiplayer`, `favorite_partner`,
-  `time_budget_remaining(profile, today)`. *Test first with a fake history.*
+  co_players, joystick side. *Test first.*
+- [ ] `[ ]` Pure analytics over history: `favorite_game`, `recent_trend(window)`,
+  `prefers_multiplayer`, `favorite_partner`,
+  `time_budget_remaining(profile, today)`, `time_played_today(profile)` — the
+  last two also drive the status bar (8.8). *Test first with a fake history.*
 
 **Done when:** given a fake history, the analytics functions return the correct
 facts, tested off-device.
 
 ### 8.2 — Recognition adapter (mockable)
 
-- [ ] `[ ]` `VisionSource` interface: `present_faces() -> list[embedding]`
-  (real impl = camera + Hailo; tests use a fake).
+- [ ] `[ ]` `VisionSource` interface: `present_faces() -> list[(embedding,
+  position)]` (real impl = camera + Hailo; tests use a fake). Position matters:
+  left/right in frame maps players to joystick sides for the status bar.
 - [ ] `[ ]` Pure `match(embeddings, profiles, threshold) -> [profile | UNKNOWN]`
   — known within threshold → match, far → guest. *Test first with fake vectors,
   including several faces at once.*
+- [ ] `[ ]` Presence snapshot: `who_is_where() -> [(profile|guest, side)]` —
+  deterministic, from vision alone (8.0's rule: the LLM never decides who is
+  present). This is the single source for greetings AND the top status bar.
 
-**Done when:** the matcher correctly classifies known vs. unknown from fake
-embeddings, off-device.
+**Done when:** the matcher classifies known vs. unknown from fake embeddings and
+the presence snapshot maps people to sides, off-device.
 
-### 8.3 — The "brief" (deterministic context builder)
+### 8.3 — Conversation engine (pure, replaces the PoC's agent)
 
-- [ ] `[ ]` `build_brief(present_profiles, histories, budgets, now) -> dict` — the
-  structured summary handed to the LLM (name, language, budget_left, top_game,
-  trend, partner_present, is_guest, which joystick/side …). Pure. *Test first.*
+The clean rewrite of what the PoC proved, structured as three pure layers with
+**no I/O, no audio, no HTTP** — fully testable with a stubbed model:
 
-**Done when:** given fake state, `build_brief` returns exactly the expected
-structured summary. This is the only object the LLM is allowed to see.
+- [ ] `[ ]` **Intent layer:** the intent list + JSON schema for constrained
+  decoding; the possibility map (8.0.16) deciding which intents are offered and
+  legal per state; the constant few-shot system prompt (EN+DE examples).
+  *Test: state → allowed intents; out-of-map intent coerced.*
+- [ ] `[ ]` **Code-match layer:** the zero-model fast paths (8.0.11) — wake word,
+  goodbye, acceptance, cancel, sides, stop, language requests, spelled names —
+  plus the name guards (8.0.17) and pending-question resolution (8.0.14). Each
+  is a small pure function with the PoC's misheard variants as test cases.
+- [ ] `[ ]` **Execute + phrase layer:** deterministic execution with all access
+  control; suggestion memory (8.0.15); EN/DE templates for every routine
+  outcome, model phrasing only for greeting-with-memory and context answers.
+  *Test the full turn pipeline with a stubbed model: transcript in → (reply
+  text, actions, state changes) out.*
+
+**Done when:** every conversational behavior the PoC demonstrated passes as a
+unit test against the new engine with a stubbed model — including the misheard
+inputs — and no module does I/O.
 
 ### 8.4 — Voice I/O (mockable)
 
-- [ ] `[ ]` STT adapter (whisper.cpp) and TTS adapter (Piper) behind interfaces;
-  tests use text stubs (no audio).
-- [ ] `[ ]` Language selection: per-profile preference, English default, German
-  for German profiles. *Test first.*
+- [ ] `[ ]` STT adapter (whisper tiny int8): EN/DE clamp, settle-then-lock,
+  vocabulary-biasing prompt, junk filter (8.0.5/8/13). Behind an interface;
+  tests use text stubs.
+- [ ] `[ ]` TTS adapter (Piper): resident voices, startup warmup, synthesis
+  cache (8.0.9). Behind an interface; tests use stubs. Whisper model and both
+  voices load from **local paths installed at provisioning time** — the adapters
+  have no download path at all; a missing model file is a hard, clear error.
+- [ ] `[ ]` **Voice pair selection: two MALE voices, one EN one DE, chosen to
+  sound as close to the same person as possible** — switching language must not
+  feel like a speaker swap (the PoC's `en_US-lessac` + `de_DE-eva_k` pair was a
+  male/female clash). Start with `en_US-ryan` + `de_DE-thorsten`; A/B a few
+  pairs by ear (same sentence, alternating languages) and pick the closest
+  timbre/pace at the `low`/`medium` tier the Pi can afford.
+- [ ] `[ ]` VAD mic loop: continuous capture, adaptive noise floor, utterance
+  segmentation (start on voice, end on ~0.8 s silence), mic closed while the
+  companion speaks. Pure segmentation logic tested with synthetic frames.
+- [ ] `[ ]` Language selection: per-profile preference, **English default**,
+  flip only on genuine spoken content (8.0.6/7). *Test first.*
 
-**Done when:** a fake STT transcript flows through to a TTS utterance, verified
-off-device with stubs.
+**Done when:** a fake transcript flows through to a TTS utterance with the
+right language, verified off-device with stubs — and the voice pair is chosen
+and documented.
 
-### 8.5 — Local LLM narrator
+### 8.5 — Local LLM adapter
 
-- [ ] `[ ]` Ollama client wrapper: system prompt = persona; input = the brief;
-  output = a short EN/DE utterance.
-- [ ] `[ ]` Enforce the golden rule: the narrator may only phrase the brief's
-  facts — it never invents history, budgets, or turn order. *Test with a mocked
-  model asserting the prompt carries only the brief; optional live smoke test.*
+- [ ] `[ ]` Ollama client wrapper exposing exactly two calls: `classify(text,
+  allowed_intents) -> intent dict` (schema-constrained) and `phrase(instruction,
+  facts, language) -> str`. Nothing else reaches the model.
+- [ ] `[ ]` Bake in the perf disciplines (8.0.3): `num_thread` pinned,
+  `keep_alive -1`, constant system prompt, boot-time prefill priming, small
+  `num_ctx`/`num_predict`. Config, not code, sets the model tag.
+- [ ] `[ ]` Model weights are **pre-pulled at provisioning time** (part of the
+  image/setup, alongside the whisper model and Piper voices); startup only
+  verifies they're present and loads them — it never pulls. *Test: startup with
+  a fake registry that would fail any pull still comes up green.*
+- [ ] `[ ]` Enforce the golden rule at the boundary: the phrase call receives
+  only the engine's facts dict — never raw history, never tool schemas. *Test
+  with a mocked transport asserting the exact prompts; optional live smoke test.*
 
-**Done when:** given a brief + a stubbed model, the narrator produces a greeting
-and the prompt contains only the brief's facts.
+**Done when:** given stubbed transport, both calls produce correct prompts and
+parse responses; the prompt provably contains only what the engine passed.
 
-### 8.6 — Interaction flow / orchestration
+### 8.6 — Orchestration (the one impure layer)
 
-- [ ] `[ ]` State machine: idle → face detected → identify → **known:** greet by
-  name, state time budget, suggest a game, say which joystick to use → **unknown:**
-  offer guest play + optional consented profile → hand off to the existing
-  launcher → on return, log the session → wrap up. *Test the transitions with all
-  fakes.*
-- [ ] `[ ]` The assistant is **idle during gameplay** — the emulator owns the Pi;
-  vision + LLM are paused (time-multiplex). Make this explicit and tested.
+- [ ] `[ ]` Session state machine wiring vision + engine + voice: idle → face
+  detected → monitor on → greet (templated unless remembered detail, 8.0.2) →
+  **known:** name, time budget, suggestion, joystick hint → **unknown:** guest
+  play + optional consented profile → hand off to the launcher → on return, log
+  the session. *Test transitions with all fakes.*
+- [ ] `[ ]` Attention states engaged/idle with the PoC's rules (8.0.12): wake
+  word to re-engage, timeout back to idle, one-request-then-idle mid-game with
+  the spoken idle hint. *Tested with fakes.*
+- [ ] `[ ]` Monitor management: on at walk-up, off by voice, off after idle
+  timeout with no game; "Hey Arc" with nobody in frame → invite over, stay dark.
+- [ ] `[ ]` The assistant is **idle during gameplay** — the emulator owns the
+  Pi; vision + LLM are paused (time-multiplex). Explicit and tested.
+- [ ] `[ ]` Per-turn step timing with streamed begin/end events (8.0.10) — the
+  data source for the status bar's listening/processing state.
 
 **Done when:** the full flow runs off-device with fakes (vision, STT/TTS, LLM,
-launcher), producing correct transitions and session logs.
+launcher), producing correct transitions, session logs, and timing events.
 
 ### 8.7 — Guest & party mode
 
 - [ ] `[ ]` New face → guest; play allowed immediately; afterwards the assistant
-  asks (voice) whether to save a **named, consented** profile — stored locally,
-  deletable, auto-expiring.
+  asks (voice) whether to save a **named, consented** profile — name captured
+  via the guarded code paths (ask → next utterance is the name → pronoun/
+  stopword/spelled-name handling → duplicate-name merge flow, 8.0.17), stored
+  locally, deletable, auto-expiring.
 - [ ] `[ ]` **Party mode:** many guests, ephemeral profiles auto-created; log who
   played what, for how long, and with whom.
 - [ ] `[ ]` "Making the rounds": a **deterministic turn scheduler** (fair queue)
@@ -389,28 +566,54 @@ launcher), producing correct transitions and session logs.
 per-guest logs, a fair turn order, and consented/deletable profiles — all
 off-device.
 
-### 8.8 — GUI integration (the speaking side + the gallery)
+### 8.8 — Cabinet HUD (two always-on bars in the gallery)
 
-- [ ] `[ ]` The Pygame gallery gains a companion side: show who is recognized, the
-  assistant's spoken line as text, and the suggested game highlighted. Pure UI
-  logic tested headless; actual rendering is a hardware checkpoint (8.9).
+The companion's face in the GUI is two persistent bars around the gallery, both
+pure-logic-first (tested headless), rendered by Pygame:
 
-**Done when:** the companion UI logic (recognized user → highlighted suggestion +
-transcript panel) is tested headless.
+- [ ] `[ ]` **Bottom conversation bar** (always visible): the companion's state
+  as a live indicator — *listening / processing (which step) / speaking* — fed
+  by the timing events (8.6); the last thing the user said (transcript, dimmed
+  when it was ignored chatter); and the companion's last reply. Pure
+  `ConversationBarState` reducer over engine/timing events. *Test first.*
+- [ ] `[ ]` **Top system bar** (always visible): CPU usage, CPU temperature, RAM
+  usage; cabinet status — which game is running, how long it's been played,
+  time remaining for the current player's daily budget (8.1 analytics); and
+  **which profiles are playing on which sides — from the vision presence
+  snapshot (8.2), never the LLM**. Pure `SystemBarState` builder over a stats
+  sampler interface (real impl reads `vcgencmd`/`/proc`; tests use fakes).
+  *Test first.*
+- [ ] `[ ]` Gallery integration: suggested game highlighted on greeting; bars
+  keep updating while browsing. Rendering itself is a hardware checkpoint (8.9).
+
+**Done when:** both bar states are computed correctly from fake events/stats,
+tested headless, and the gallery renders them (visually verified in the Docker
+VNC environment, on-cabinet in 8.9).
 
 ### 8.9 — Real-hardware bring-up (needs the AI HAT + camera + speakerphone)
 
 - [ ] `[ ]` AI HAT+ installed; the camera recognizes the family at the cabinet in
   real lighting; unknown faces fall through to a spoken "are you X, or a guest?"
-  rather than mislogging.
+  rather than mislogging; side detection (who is left/right) matches reality.
 - [ ] `[ ]` Whisper + Piper real latency is acceptable; LLM tok/s is acceptable
-  for **terse** replies.
+  for **terse** replies; the PoC's ~2–4 s typical turn holds on the real Pi
+  (the Docker throttle was an optimistic bound — memory bandwidth is lower).
+- [ ] `[ ]` The matched voice pair sounds right on the real speaker — same-person
+  feel across an EN↔DE switch; re-pick the pair if the cabinet speaker changes
+  the verdict.
 - [ ] `[ ]` Thermals OK under LLM + idle with active cooling; the assistant is
   genuinely idle during gameplay (no frame-rate hit to the emulator); the
-  watchdog still protects the Pi.
+  watchdog still protects the Pi; the top bar's CPU/temp/RAM read the real
+  sensors.
+- [ ] `[ ]` **Offline test:** power the Pi up with **no network at all** (cable
+  unplugged, Wi-Fi off) — it boots into the gallery and the full companion
+  experience works: recognition, greeting, STT/TTS, LLM, game launch, logging.
+  No boot-time download, no degraded mode, no startup delay waiting on a
+  network timeout.
 - [ ] `[ ]` End-to-end: walk up → greeted by name in the right language → get a
-  game suggestion + joystick hint → play → session logged. Nothing leaves the Pi.
+  game suggestion + joystick hint → play (bars live the whole time) → session
+  logged. Nothing leaves the Pi.
 
 **Done when:** at the real cabinet, a known person is greeted by name in their
-language, gets a suggestion and a joystick hint, plays, and the session is logged
-— entirely on-device.
+language, gets a suggestion and a joystick hint, plays with both bars live, and
+the session is logged — entirely on-device.
