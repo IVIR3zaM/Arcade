@@ -232,26 +232,17 @@ def test_recommend_honors_genre_and_rejections():
     assert "Mario" in data["recommendation"]
 
 
-def test_asking_for_farsi_switches_asking_for_french_does_not():
+def test_asking_for_an_unsupported_language_refuses_without_switching():
     def boom(system, user, as_json=False):
         raise AssertionError("must not need the model")
 
-    # Farsi is enabled (experimental) — switching works.
-    sess = _session(["unknown"])
-    _text, _actions, kind = agent.handle_turn(
-        sess, "Can you speak Farsi?", "en", chat=boom
-    )
-    assert kind == "language_set"
-    assert sess.new_language == "fa"
-
-    # A language Arc doesn't have gets an honest refusal, not a wrong switch.
-    sess2 = _session(["unknown"])
-    text, _actions, kind = agent.handle_turn(
-        sess2, "Can you speak French?", "en", chat=boom
-    )
-    assert kind == "language_unsupported"
-    assert "English, German" in text
-    assert sess2.new_language is None
+    # Persian is disabled — asking for it gets an honest refusal, not a switch.
+    for phrase in ("Can you speak Farsi?", "Can you speak French?"):
+        sess = _session(["unknown"])
+        text, _actions, kind = agent.handle_turn(sess, phrase, "en", chat=boom)
+        assert kind == "language_unsupported", phrase
+        assert "English and German" in text
+        assert sess.new_language is None
 
 
 def test_model_switch_language_is_revalidated_against_the_utterance():
@@ -266,6 +257,27 @@ def test_model_switch_language_is_revalidated_against_the_utterance():
     )
     assert kind == "language_unsupported"
     assert sess.new_language is None
+
+
+def test_model_intent_outside_the_possibility_map_is_dropped():
+    # Mid-game the model must not be able to delete a profile — that intent is
+    # not on the menu it was given, so a stray one is coerced to "other".
+    def chat(system, user, as_json=False):
+        return json.dumps({"intent": "delete_profile", "name": "Mia"})
+
+    sess = _session(["Reza"])
+    sess.running_game = "Pong"
+    intent = agent.classify_intent(
+        "delete Mia", ["Reza"], chat=chat, allowed=agent.allowed_intents(sess)
+    )
+    assert intent["intent"] == "other"
+
+    # With no game running, the same intent is allowed through.
+    free = _session(["Reza"])
+    intent = agent.classify_intent(
+        "delete Mia", ["Reza"], chat=chat, allowed=agent.allowed_intents(free)
+    )
+    assert intent["intent"] == "delete_profile"
 
 
 def test_accepting_the_suggestion_launches_it():
@@ -304,7 +316,6 @@ def test_joystick_request_is_matched_in_code():
         raise AssertionError("a joystick request must not need the model")
 
     sess = _session(["unknown"])
-    sess.running_game = "Super Mario World"
     text, _actions, kind = agent.handle_turn(
         sess,
         "I wanna use Ride joystick.",
@@ -343,10 +354,180 @@ def test_naming_the_full_title_mid_browse_launches_it():
     assert "(named the game)" in actions[0]["summary"]
 
 
-def test_come_over_line_exists_in_all_three_languages():
-    for lang in ("en", "de", "fa"):
+def test_come_over_line_exists_in_both_languages():
+    for lang in ("en", "de"):
         line = agent.phrase("come_over", {}, lang, chat=None)
         assert line  # canned — no model involved
+
+
+def test_mid_game_joystick_change_offers_a_restart():
+    def boom(system, user, as_json=False):
+        raise AssertionError("must not need the model")
+
+    # Assigning a joystick is part of launching — mid-game it needs a restart.
+    sess = _session(["unknown"])
+    sess.running_game = "Super Mario World"
+    text, _actions, kind = agent.handle_turn(
+        sess, "I wanna use the left joystick now.", "en", chat=boom
+    )
+    assert kind == "joystick_in_game"
+    assert "restart" in text.lower()
+    assert sess.pending_request == "restart:left"
+    assert sess.running_game == "Super Mario World"  # untouched
+
+    # "Yes" → close + relaunch with the new side.
+    sess2 = _session(["unknown"])
+    sess2.running_game = "Super Mario World"
+    _text, actions, kind = agent.handle_turn(
+        sess2, "Yes please.", "en", chat=boom, pending="restart:left"
+    )
+    assert kind == "played"
+    assert [a["tool"] for a in actions[1:]] == [
+        "close_game",
+        "launch_game",
+        "assign_joystick",
+    ]
+    assert actions[-1]["args"]["side"] == "left"
+
+    # "No" keeps everything as it is.
+    sess3 = _session(["unknown"])
+    sess3.running_game = "Super Mario World"
+    _text, _actions, kind = agent.handle_turn(
+        sess3, "no, never mind", "en", chat=boom, pending="restart:left"
+    )
+    assert kind == "cancelled"
+    assert sess3.running_game == "Super Mario World"
+
+
+def test_launching_another_game_mid_game_asks_to_close_first():
+    # A game is running: launching a different one must confirm the close first,
+    # not silently swap it.
+    def chat(system, user, as_json=False):
+        return json.dumps({"intent": "play_game", "title": "Tetris"})
+
+    sess = _session(["Leo"])
+    sess.running_game = "Pong"
+    text, actions, kind = agent.handle_turn(sess, "let's play Tetris", "en", chat=chat)
+    assert kind == "confirm_close"
+    assert "Pong" in text and "close" in text.lower()
+    assert sess.running_game == "Pong"  # untouched until confirmed
+    assert sess.pending_request.startswith("confirm_close:")
+    assert not any(a["tool"] == "launch_game" for a in actions)
+
+    # "Yes" → close Pong, then launch Tetris.
+    def boom(system, user, as_json=False):
+        raise AssertionError("the confirmation must not need the model")
+
+    text, actions, kind = agent.handle_turn(
+        sess, "yes please", "en", chat=boom, pending=sess.pending_request
+    )
+    assert kind in ("played", "played_need_side")
+    tools_called = [
+        a["tool"] for a in actions if a["tool"] in ("close_game", "launch_game")
+    ]
+    assert tools_called == ["close_game", "launch_game"]
+    assert sess.running_game == "Tetris"
+
+
+def test_declining_the_close_keeps_the_running_game():
+    def boom(system, user, as_json=False):
+        raise AssertionError("the confirmation must not need the model")
+
+    sess = _session(["Leo"])
+    sess.running_game = "Pong"
+    _text, _actions, kind = agent.handle_turn(
+        sess,
+        "no, never mind",
+        "en",
+        chat=boom,
+        pending="confirm_close:"
+        + json.dumps({"intent": "play_game", "title": "Tetris"}),
+    )
+    assert kind == "cancelled"
+    assert sess.running_game == "Pong"
+
+
+def test_turning_the_screen_off_mid_game_asks_to_close_first():
+    def chat(system, user, as_json=False):
+        return json.dumps({"intent": "monitor", "on": False})
+
+    sess = _session(["Reza"])
+    sess.running_game = "Pong"
+    _text, actions, kind = agent.handle_turn(
+        sess, "turn everything off", "en", chat=chat
+    )
+    assert kind == "confirm_close"
+    assert not any(a["tool"] == "set_monitor" for a in actions)
+
+
+def test_relaunching_the_same_running_game_does_not_ask_to_close():
+    # "Play Pong" while Pong is already on isn't a request to close anything.
+    def chat(system, user, as_json=False):
+        return json.dumps({"intent": "play_game", "title": "Pong"})
+
+    sess = _session(["Leo"])
+    sess.running_game = "Pong"
+    _text, _actions, kind = agent.handle_turn(sess, "play Pong", "en", chat=chat)
+    assert kind != "confirm_close"
+
+
+def test_gonna_have_is_not_a_name():
+    # "No, I'm gonna have a Profile here." created the profile "Gonna Have" live.
+    def chat(system, user, as_json=False):
+        return json.dumps({"intent": "create_profile"})
+
+    assert agent.name_from_utterance("No, I'm gonna have a Profile here.") is None
+    sess = _session(["unknown"])
+    _text, _actions, kind = agent.handle_turn(
+        sess, "No, I'm gonna have a Profile here.", "en", chat=chat
+    )
+    assert kind == "ask_name"
+    assert store.get_profile(sess.conn, "Gonna Have") is None
+
+
+def test_existing_name_asks_to_merge_instead_of_duplicating():
+    def boom(system, user, as_json=False):
+        raise AssertionError("must not need the model")
+
+    sess = _session(["unknown"])
+    # "Mia" is already a known profile.
+    text, _actions, kind = agent.handle_turn(
+        sess, "My name is Mia.", "en", chat=boom, pending="name"
+    )
+    assert kind == "profile_exists"
+    assert "Mia" in text
+    assert sess.pending_request == "merge:Mia"
+
+    # "Yes, that's me" → recognized as the existing person, no new profile.
+    _text, _actions, kind = agent.handle_turn(
+        sess, "Yes!", "en", chat=boom, pending="merge:Mia"
+    )
+    assert kind == "profile_merged"
+    assert sess.recognized_as == "Mia"
+
+    # "No" → ask for a different name instead.
+    sess2 = _session(["unknown"])
+    _text, _actions, kind = agent.handle_turn(
+        sess2, "no", "en", chat=boom, pending="merge:Mia"
+    )
+    assert kind == "ask_other_name"
+
+
+def test_context_reports_how_long_the_game_has_been_running():
+    import time as _time
+
+    sess = _session(["Leo"])
+    sess.running_game = "Pong"
+    sess.game_started_at = _time.time() - 600  # 10 minutes ago
+    kind, data, _ = agent.execute_intent(sess, {"intent": "get_context"})
+    assert kind == "context"
+    assert data["running_game"] == "Pong"
+    assert data["playing_for_minutes"] == 10
+
+
+def test_idle_hint_exists_in_both_languages():
+    for lang in ("en", "de"):
+        assert agent.idle_hint(lang)
 
 
 def test_misheard_close_request_stops_the_running_game():

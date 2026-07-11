@@ -10,6 +10,7 @@ in code before calling.
 """
 
 import difflib
+import time
 from dataclasses import dataclass, field
 
 from . import hardware, store
@@ -39,6 +40,11 @@ class Session:
     new_language: str | None = None  # set when the person asks to switch language
     last_suggested: str | None = None  # the game Arc offered last ("How about X?")
     rejected: list[str] = field(default_factory=list)  # suggestions declined this visit
+    game_started_at: float | None = None  # epoch seconds; for "how long am I playing?"
+    pending_request: str | None = (
+        None  # question Arc just asked ("restart:left", "merge:Kean")
+    )
+    recognized_as: str | None = None  # merge accepted: the guest IS this known person
 
     def display_present(self) -> list[str]:
         return ["Guest" if n == "unknown" else n for n in self.present]
@@ -205,6 +211,7 @@ def launch_game(session: Session, title: str) -> dict:
         return {"error": f"no game matches {title!r}", "did_you_mean": suggestions}
     game = next(g for g in GAMES if g.title == matched)
     session.running_game = matched
+    session.game_started_at = time.time()
     player = session.display_present()[0] if session.present else "someone"
     store.log_play(session.conn, player, matched)
     return {
@@ -220,6 +227,7 @@ def close_game(session: Session) -> dict:
         return {"error": "no game is running"}
     closed = session.running_game
     session.running_game = None
+    session.game_started_at = None
     return {"closed": closed}
 
 
@@ -254,8 +262,8 @@ def set_monitor(session: Session, on: bool) -> dict:
 
 def set_language(session: Session, language: str, name: str = "") -> dict:
     """Switch the conversation language, persisting it on the speaker's profile."""
-    if language not in ("en", "de", "fa"):
-        return {"error": f"unsupported language {language!r} (en, de, or fa)"}
+    if language not in ("en", "de"):
+        return {"error": f"unsupported language {language!r} (en or de)"}
     session.new_language = language
     persisted = bool(name) and store.set_language(session.conn, name, language)
     return {"language": language, "persisted_for": name if persisted else None}
@@ -265,7 +273,19 @@ def get_context(session: Session) -> dict:
     current = hardware.now()
     schedules = store.list_schedules(session.conn)
     devices = hardware.devices_state(current, schedules)
+    extra = {}
+    # Who's asking, with what Arc remembers — answers "what do you know about me?"
+    speaker = next((n for n in session.display_present() if n != "Guest"), None)
+    row = store.get_profile(session.conn, speaker) if speaker else None
+    if row:
+        extra["speaker"] = {"name": row["name"], "memory": row["notes"]}
+    if session.running_game and session.game_started_at:
+        extra["running_game"] = session.running_game
+        extra["playing_for_minutes"] = max(
+            0, round((time.time() - session.game_started_at) / 60)
+        )
     return {
+        **extra,
         "datetime": current.isoformat(timespec="minutes"),
         "weekday": current.strftime("%A"),
         "hour": current.hour,

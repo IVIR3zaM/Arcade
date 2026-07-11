@@ -73,10 +73,40 @@ _INTENT_SCHEMA = {
         "start": {"type": "string"},
         "end": {"type": "string"},
         "on": {"type": "boolean"},
-        "language": {"type": "string", "enum": ["en", "de", "fa"]},
+        "language": {"type": "string", "enum": ["en", "de"]},
     },
     "required": ["intent"],
 }
+
+
+# --- possibility map: what is doable in the current state -------------------
+#
+# The order and legality of intents depends on the cabinet's state — most of all
+# on whether a game is running. A game "owns" the screen and the joysticks, so
+# anything that would disrupt it (launching another game, remapping a joystick,
+# turning the screen off, changing privacy) is impossible until the game is
+# closed — and Arc must ASK before closing it. This map is the single source of
+# truth for that, used BOTH to steer the model (only doable intents are offered)
+# and to enforce the rule in code (execute_intent, below).
+
+# Intents that only take effect with NO game running. While one is on, Arc
+# offers to close it first; a stray "turn off the screen" never kills a game.
+_REQUIRE_NO_GAME = {"play_game", "monitor", "set_privacy"}
+
+# While a game runs, profiles are managed between games, not mid-play — those
+# intents aren't offered to the model at all. The require-no-game intents stay
+# offered so a real request ("play Tetris") is recognized and Arc can offer to
+# close the current game first.
+_INGAME_INTENTS = [
+    n for n in _INTENT_NAMES if n not in ("create_profile", "delete_profile")
+]
+
+
+def allowed_intents(session) -> list[str]:
+    """The intents that make sense right now — the possibility map."""
+    if session.running_game:
+        return _INGAME_INTENTS
+    return _INTENT_NAMES
 
 
 def _chat(system: str, user: str, as_json: bool = False) -> str:
@@ -134,21 +164,30 @@ _INTENT_EXAMPLES = (
     '"speak English please" -> {"intent":"switch_language","language":"en"}\n'
     '"can you speak any english?" -> {"intent":"switch_language","language":"en"}\n'
     '"sprich Deutsch" -> {"intent":"switch_language","language":"de"}\n'
-    '"بازی پونگ رو بذار" -> {"intent":"play_game","title":"Pong"}\n'
-    '"چه بازی‌هایی داری؟" -> {"intent":"list_games"}\n'
     '"what time is it?" -> {"intent":"get_context"}\n'
+    '"what is the cpu temperature?" -> {"intent":"get_context"}\n'
+    '"how long have I been playing?" -> {"intent":"get_context"}\n'
+    '"what do you remember about me?" -> {"intent":"get_context"}\n'
     '"bye" -> {"intent":"goodbye"}\n'
     '"tschüss" -> {"intent":"goodbye"}'
 )
 
 
-def classify_intent(user_text: str, present: list[str], chat=_chat) -> dict:
-    """Small JSON call: extract the user's intent. Never decides access."""
+def classify_intent(
+    user_text: str, present: list[str], chat=_chat, allowed: list[str] | None = None
+) -> dict:
+    """Small JSON call: extract the user's intent. Never decides access.
+
+    `allowed` is the possibility map for the current state — only those intents
+    are offered to the model, and anything outside it is coerced to "other" (a
+    3B occasionally reaches past the menu it was given).
+    """
+    allowed = allowed or _INTENT_NAMES
     titles = ", ".join(g.title for g in GAMES)
     system = (
         "You label what a person at an arcade wants, as JSON only (no prose). "
-        "The person may speak English, German, or Persian (Farsi). "
-        f"Intents: {', '.join(_INTENT_NAMES)}. Known games: {titles}."
+        "The person may speak English or German. "
+        f"Intents: {', '.join(allowed)}. Known games: {titles}."
     )
     user = (
         f"Examples:\n{_INTENT_EXAMPLES}\n\n"
@@ -159,9 +198,14 @@ def classify_intent(user_text: str, present: list[str], chat=_chat) -> dict:
         'unrelated, use {"intent":"other"}.'
     )
     try:
-        return json.loads(chat(system, user, as_json=True))
+        data = json.loads(chat(system, user, as_json=True))
     except (json.JSONDecodeError, TypeError):
         return {"intent": "other"}
+    if data.get("intent") not in allowed:
+        # The model reached for an intent that's impossible right now (e.g.
+        # deleting a profile mid-game) — treat it as unrelated.
+        data["intent"] = "other"
+    return data
 
 
 # --- guards: never trust a small model with names ----------------------------
@@ -210,6 +254,67 @@ _PRONOUNS = {
 }
 
 
+# Ordinary words that follow a name cue without being a name: "I'm GONNA HAVE a
+# profile here" produced the profile "Gonna Have" live. A name containing any of
+# these is rejected and Arc asks instead.
+_NAME_STOPWORDS = {
+    "gonna",
+    "going",
+    "wanna",
+    "want",
+    "wants",
+    "will",
+    "would",
+    "just",
+    "also",
+    "have",
+    "has",
+    "had",
+    "need",
+    "needs",
+    "get",
+    "getting",
+    "make",
+    "making",
+    "a",
+    "an",
+    "the",
+    "new",
+    "here",
+    "there",
+    "now",
+    "then",
+    "so",
+    "not",
+    "no",
+    "yes",
+    "okay",
+    "ok",
+    "sure",
+    "really",
+    "very",
+    "done",
+    "ready",
+    "back",
+    "profile",
+    "profil",
+    "game",
+    "play",
+    "playing",
+    "spielen",
+    "konto",
+    "möchte",
+    "will",
+    "gerne",
+    "bitte",
+    "ein",
+    "eine",
+    "hier",
+    "jetzt",
+    "neues",
+}
+
+
 def _clean_name(name) -> str | None:
     """A usable person name from the model, or None.
 
@@ -220,7 +325,10 @@ def _clean_name(name) -> str | None:
     n = str(name or "").strip().strip(".,!?")
     if not n or n.lower() in _PRONOUNS:
         return None
-    if len(n.split()) > 2 or any(ch.isdigit() for ch in n):
+    words = n.split()
+    if len(words) > 2 or any(ch.isdigit() for ch in n):
+        return None
+    if any(w.lower() in _NAME_STOPWORDS or w.lower() in _PRONOUNS for w in words):
         return None
     return n
 
@@ -264,7 +372,12 @@ _CANCEL_WORDS = {
 
 
 def is_cancel(text: str) -> bool:
-    return text.strip().strip(".,!?").lower() in _CANCEL_WORDS
+    t = " ".join(re.sub(r"[^\w\s']", " ", text.lower()).split())
+    if not t or len(t.split()) > 4:
+        return False
+    return t in _CANCEL_WORDS or bool(
+        difflib.get_close_matches(t, _CANCEL_WORDS, n=1, cutoff=0.85)
+    )
 
 
 # Goodbye is detected in code, fuzzily — whisper renders "Tschüss!" as "Schüsse"
@@ -299,12 +412,15 @@ def is_goodbye(text: str) -> bool:
 # hallucinated "Ich kann kein Englisch sprechen". A language word plus any
 # speak-ish word is unambiguous — no model needed.
 _LANG_WORDS = {
-    "en": ("english", "englisch", "انگلیسی"),
-    "de": ("german", "deutsch", "آلمانی"),
-    "fa": ("persian", "persisch", "farsi", "فارسی"),  # experimental third language
+    "en": ("english", "englisch"),
+    "de": ("german", "deutsch"),
     # Any other language → "other": Arc must SAY what it can speak. Left to the
     # model, the schema forces a supported code and it "switches" wrongly.
+    # Persian lives here too — the cabinet only speaks English and German.
     "other": (
+        "persian",
+        "persisch",
+        "farsi",
         "french",
         "französisch",
         "spanish",
@@ -379,6 +495,15 @@ _ACCEPTANCES = (
     "yes it is",
     "yes do it",
     "that's it",
+    "yes that's me",
+    "that's me",
+    "yes it's me",
+    "it's me",
+    "yes i am",
+    "das bin ich",
+    "ja das bin ich",
+    "بله خودمم",
+    "خودمم",
     "yeah",
     "yep",
     "sure",
@@ -553,6 +678,19 @@ def _speaker(session) -> str:
     return "Guest"
 
 
+def _same_running_game(session, title: str) -> bool:
+    """True if `title` is (fuzzily) the game already running — asking to 'play
+    Pong' while Pong is on isn't a request to close anything."""
+    if not session.running_game or not title:
+        return False
+    return (
+        difflib.SequenceMatcher(
+            None, title.lower(), session.running_game.lower()
+        ).ratio()
+        >= 0.8
+    )
+
+
 def execute_intent(
     session, intent: dict, language: str = "en"
 ) -> tuple[str, dict, list[dict]]:
@@ -576,6 +714,10 @@ def execute_intent(
         return result
 
     def play(title: str) -> tuple[str, dict, list[dict]]:
+        if intent.get("restart") and session.running_game:
+            # Changing joystick mid-game means restarting the game with the
+            # new mapping — the running emulator can't reroute inputs live.
+            do("close_game")
         res = do("launch_game", title=title)
         if "error" in res:
             return "game_not_found", res, actions
@@ -615,6 +757,25 @@ def execute_intent(
         session.last_suggested = res.get("recommendation")
         return "recommendation", res, actions
 
+    # --- possibility gate: a running game must be closed first ---------------
+    # Launching another game, remapping a joystick, turning the screen off or
+    # changing privacy all disrupt a running game, so they're impossible until
+    # it's closed — and Arc asks first. `_confirmed_close` is set once the
+    # player has said yes (see handle_turn), so the action goes through.
+    confirmed = bool(intent.pop("_confirmed_close", False))
+    if (
+        session.running_game
+        and kind in _REQUIRE_NO_GAME
+        and not confirmed
+        and not (
+            kind == "play_game" and _same_running_game(session, intent.get("title", ""))
+        )
+    ):
+        session.pending_request = "confirm_close:" + json.dumps(intent)
+        return "confirm_close", {"game": session.running_game}, actions
+    if confirmed and session.running_game:
+        do("close_game")
+
     if kind == "play_game":
         return play(intent.get("title", ""))
 
@@ -626,12 +787,18 @@ def execute_intent(
         return "stopped", do("close_game"), actions
 
     if kind == "joystick":
-        res = do(
-            "assign_joystick",
-            player=_speaker(session),
-            side=intent.get("side") or "",
-        )
-        return "joystick_set", {**res, "in_game": bool(session.running_game)}, actions
+        side = intent.get("side") or ""
+        if session.running_game and not intent.get("initial"):
+            # Joystick mapping is part of launching the game — it can't change
+            # while one is running. Offer to restart with the new side.
+            session.pending_request = f"restart:{side or 'left'}"
+            return (
+                "joystick_in_game",
+                {"side": side or "left", "game": session.running_game},
+                actions,
+            )
+        res = do("assign_joystick", player=_speaker(session), side=side)
+        return "joystick_set", res, actions
 
     if kind == "list_games":
         return "games_list", do("list_games"), actions
@@ -640,9 +807,14 @@ def execute_intent(
         return recommend(genre=intent.get("genre", ""), query=intent.get("query", ""))
 
     if kind == "remember":
+        note = (intent.get("note") or "").strip()
+        if not note:
+            # "What do you remember about me?" gets misrouted here — with no
+            # actual note to store, answer from context instead of writing junk.
+            return "context", do("get_context"), actions
         return (
             "remembered",
-            do("remember", name=_speaker(session), note=intent.get("note", "")),
+            do("remember", name=_speaker(session), note=note),
             actions,
         )
 
@@ -653,6 +825,11 @@ def execute_intent(
         name = _clean_name(intent.get("name"))
         if name is None:
             return "ask_name", {}, actions
+        if tools.store.get_profile(session.conn, name):
+            # That name exists. Maybe the AI HAT filed the same person under a
+            # new face — ask before creating a duplicate or overwriting.
+            session.pending_request = f"merge:{name}"
+            return "profile_exists", {"name": name}, actions
         return (
             "profile_created",
             do("create_profile", name=name, language=language),
@@ -694,10 +871,10 @@ def execute_intent(
     if kind == "switch_language":
         lang = intent.get("language")
         if lang == "other":
-            # Asked for a language Arc doesn't have (French, ...) — say so
-            # honestly instead of "switching" to one it does have.
+            # Asked for a language Arc doesn't have (Persian, French, ...) — say
+            # so honestly instead of "switching" to one it does have.
             return "language_unsupported", {}, actions
-        if lang not in ("en", "de", "fa"):
+        if lang not in ("en", "de"):
             return "unclear", {}, actions
         speaker = _speaker(session)
         res = do(
@@ -722,38 +899,40 @@ _CANNED = {
     "goodbye": {
         "en": "Have fun — see you next time!",
         "de": "Viel Spaß — bis bald!",
-        "fa": "خوش بگذره — تا دفعه بعد!",
     },
     "unclear": {
         "en": "Sorry, I didn't catch that — could you say it again?",
         "de": "Entschuldigung, das habe ich nicht verstanden — nochmal bitte?",
-        "fa": "ببخشید، متوجه نشدم — میشه دوباره بگی؟",
     },
     "wake_ack": {
         "en": "Yes? I'm listening.",
         "de": "Ja? Ich höre.",
-        "fa": "بله؟ گوش می‌کنم.",
     },
     "ask_name": {
         "en": "Gladly! What's your name?",
         "de": "Gerne! Wie heißt du denn?",
-        "fa": "با کمال میل! اسمت چیه؟",
     },
     "cancelled": {
         "en": "Okay, no problem.",
         "de": "Okay, kein Problem.",
-        "fa": "باشه، مشکلی نیست.",
     },
     "language_unsupported": {
-        "en": "Sorry — I can speak English, German, and a bit of Farsi.",
-        "de": "Entschuldigung — ich spreche Englisch, Deutsch und etwas Farsi.",
-        "fa": "متأسفم — فقط انگلیسی، آلمانی و کمی فارسی بلدم.",
+        "en": "Sorry — I can speak English and German.",
+        "de": "Entschuldigung — ich spreche Englisch und Deutsch.",
+    },
+    "ask_other_name": {
+        "en": "No problem — what name should I save for you instead?",
+        "de": "Kein Problem — unter welchem Namen soll ich dich dann speichern?",
+    },
+    # Appended whenever Arc goes back to ignoring gameplay chatter.
+    "idle_hint": {
+        "en": "I'll go quiet now — say 'Hey Arc' when you need me.",
+        "de": "Ich bin jetzt still — sag 'Hey Arc', wenn du mich brauchst.",
     },
     # Someone said "Hey Arc" but the camera sees nobody at the cabinet.
     "come_over": {
         "en": "I can hear you, but I can't see anyone at the cabinet — come on over if you want to play!",
         "de": "Ich höre dich, aber ich sehe niemanden am Automaten — komm vorbei, wenn du spielen willst!",
-        "fa": "صداتو می‌شنوم ولی کسی رو جلوی دستگاه نمی‌بینم — اگه می‌خوای بازی کنی بیا جلو!",
     },
 }
 
@@ -770,16 +949,16 @@ def _render(kind: str, data: dict, language: str) -> str | None:
         return {
             "de": "Alles klar — ab jetzt Deutsch!",
             "en": "Alright — English it is!",
-            "fa": "باشه — از حالا فارسی حرف می‌زنم!",
         }.get(data.get("language"), "Alright!")
-
-    if language == "fa":
-        # Experimental: no hand-written Farsi templates — let the model phrase
-        # every outcome from the facts. Slower, but that's what we're testing.
-        return None
 
     de = language == "de"
     err = data.get("error")
+
+    if kind == "confirm_close":
+        game = data.get("game", "the game")
+        if de:
+            return f"Dafür müsste ich erst {game} schließen — soll ich das?"
+        return f"I'd need to close {game} first — should I?"
 
     if kind == "played":
         joy = data.get("joystick") or "left"
@@ -895,17 +1074,34 @@ def _render(kind: str, data: dict, language: str) -> str | None:
             )
         joy = data.get("joystick", "left")
         who = data.get("player", "")
-        # Mid-game Arc goes back to ignoring chatter right after this reply.
-        hint = ""
-        if data.get("in_game"):
-            hint = (
-                " Viel Spaß weiter — sag 'Hey Arc', wenn du mich brauchst."
-                if de
-                else " Enjoy — say 'Hey Arc' if you need me again."
-            )
         if de:
-            return f"Alles klar, {who} — du hast jetzt den {_JOY_DE.get(joy, joy)} Joystick.{hint}"
-        return f"Done, {who} — you've got the {joy} joystick now.{hint}"
+            return f"Alles klar, {who} — du hast jetzt den {_JOY_DE.get(joy, joy)} Joystick."
+        return f"Done, {who} — you've got the {joy} joystick now."
+
+    if kind == "joystick_in_game":
+        joy = data.get("side", "left")
+        game = data.get("game", "")
+        if de:
+            return (
+                f"Den Joystick kann ich nicht wechseln, während {game} läuft — "
+                f"soll ich es mit dem {_JOY_DE.get(joy, joy)} Joystick neu starten?"
+            )
+        return (
+            f"I can't swap joysticks while {game} is running — "
+            f"should I restart it with the {joy} joystick?"
+        )
+
+    if kind == "profile_exists":
+        who = data.get("name", "")
+        if de:
+            return f"Ich kenne schon eine Person namens {who} — bist du das? Soll ich das Profil laden?"
+        return f"I already know someone called {who} — is that you? Should I use that profile?"
+
+    if kind == "profile_merged":
+        who = data.get("name", "")
+        if de:
+            return f"Willkommen zurück, {who}! Ich habe dein Profil geladen."
+        return f"Welcome back, {who}! I've loaded your profile."
 
     if kind == "monitor_set":
         if data.get("monitor_on"):
@@ -937,10 +1133,16 @@ _PHRASE_INSTRUCTION = {
     "unrecognized guest), offer to save a profile — never offer that to known people.",
     "context": "Answer the person's question naturally using the facts. If the "
     "facts don't contain the answer, say you're not sure — never make one up.",
+    # Safety net only: EN/DE templates cover these, so the model is not reached.
+    "joystick_in_game": "Explain you can't swap joysticks while the running game "
+    "in the facts is on, and ask if you should restart it with that joystick.",
+    "profile_exists": "Say you already know someone by the name in the facts and "
+    "ask if that's them — should you load that profile?",
+    "profile_merged": "Welcome them back by name; their profile is loaded.",
 }
 
 
-_LANG_NAMES = {"en": "English", "de": "German", "fa": "Persian (Farsi)"}
+_LANG_NAMES = {"en": "English", "de": "German"}
 
 
 def _canned(kind: str, language: str) -> str:
@@ -948,11 +1150,17 @@ def _canned(kind: str, language: str) -> str:
     return lines.get(language) or lines["en"]
 
 
+def idle_hint(language: str) -> str:
+    """The 'I'll go quiet now' notice, appended by the app when it flips a
+    mid-game session back to wake-word-only listening."""
+    return _canned("idle_hint", language)
+
+
 def phrase(kind: str, data: dict, language: str, chat=_chat) -> str:
     """One spoken line for an outcome: canned → template → model, in that order.
 
-    Farsi is experimental: only the canned lines are hand-translated; everything
-    else falls through to the model with "speak Persian" — that's the test.
+    The cabinet speaks English and German only; both have hand-written templates,
+    so the model is reached only for the open-ended outcomes (greeting, context).
     """
     if kind in _CANNED:
         return _canned(kind, language)
@@ -1032,7 +1240,7 @@ def handle_turn(
         # We just asked "which joystick?" — "the right one" is a full answer.
         answer = side_word(user_text)
         if answer:
-            intent = {"intent": "joystick", "side": answer}
+            intent = {"intent": "joystick", "side": answer, "initial": True}
             note = " (side from reply)"
         elif is_cancel(user_text):
             routing = {
@@ -1041,6 +1249,67 @@ def handle_turn(
                 "summary": "intent=cancelled (pending joystick)",
             }
             return phrase("cancelled", {}, language, chat=chat), [routing], "cancelled"
+    if pending and pending.startswith("restart:") and intent is None:
+        # We asked "should I restart on the other joystick?" — yes/no, or they
+        # name a side directly ("the left one actually").
+        wanted = side_word(user_text) or pending.split(":", 1)[1]
+        if is_acceptance(user_text) or side_word(user_text):
+            intent = {
+                "intent": "play_game",
+                "title": session.running_game,
+                "side": wanted,
+                "restart": True,
+            }
+            note = " (restart confirmed)"
+        elif is_cancel(user_text):
+            routing = {
+                "tool": "route",
+                "args": {"heard": user_text},
+                "summary": "intent=cancelled (kept current joystick)",
+            }
+            return phrase("cancelled", {}, language, chat=chat), [routing], "cancelled"
+    if pending and pending.startswith("merge:") and intent is None:
+        # We asked "I already know a {name} — is that you?"
+        existing = pending.split(":", 1)[1]
+        if is_acceptance(user_text):
+            session.recognized_as = existing
+            routing = {
+                "tool": "route",
+                "args": {"heard": user_text},
+                "summary": f"intent=profile_merged (recognized as {existing})",
+            }
+            return (
+                phrase("profile_merged", {"name": existing}, language, chat=chat),
+                [routing],
+                "profile_merged",
+            )
+        if is_cancel(user_text):
+            routing = {
+                "tool": "route",
+                "args": {"heard": user_text},
+                "summary": "intent=ask_other_name (same name, different person)",
+            }
+            return (
+                phrase("ask_other_name", {}, language, chat=chat),
+                [routing],
+                "ask_other_name",
+            )
+    if pending and pending.startswith("confirm_close:") and intent is None:
+        # We asked "should I close {game} first?" before doing something that
+        # needs the game closed (play another, screen off, privacy).
+        if is_acceptance(user_text) or is_stop_request(user_text):
+            intent = json.loads(pending[len("confirm_close:") :])
+            intent["_confirmed_close"] = True
+            note = " (close confirmed)"
+        elif is_cancel(user_text):
+            routing = {
+                "tool": "route",
+                "args": {"heard": user_text},
+                "summary": "intent=cancelled (kept the game running)",
+            }
+            return phrase("cancelled", {}, language, chat=chat), [routing], "cancelled"
+        # Anything else is a fresh request — fall through; if it also needs the
+        # game closed, the gate in execute_intent asks again.
     if intent is None and is_goodbye(user_text):
         intent = {"intent": "goodbye"}
         note = " (matched in code)"
@@ -1062,7 +1331,12 @@ def handle_turn(
         intent = {"intent": "joystick", "side": side}
         note = " (matched in code)"
     if intent is None:
-        intent = classify_intent(user_text, session.display_present(), chat=chat)
+        intent = classify_intent(
+            user_text,
+            session.display_present(),
+            chat=chat,
+            allowed=allowed_intents(session),
+        )
         if intent.get("intent") == "create_profile":
             # Never trust the model with the name — code extracts it (or asks).
             intent["name"] = name_from_utterance(user_text)

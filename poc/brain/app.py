@@ -20,6 +20,7 @@ is opened per request because FastAPI serves sync endpoints across threads.
 
 import base64
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -58,6 +59,14 @@ _JUNK = {
 def _is_junk(text: str) -> bool:
     t = text.strip().strip(".,!?* ").lower()
     return len(t) < 2 or t in _JUNK
+
+
+def _spoken_content(text: str) -> bool:
+    """True if `text` carries real spoken content (≥2 words) — the bar for
+    trusting whisper's language guess enough to switch. The wake phrase alone
+    ("Hey Arc") reads as English and must never flip a German cabinet, and a
+    one-word reply ("okay") is too little signal."""
+    return len(re.findall(r"[^\W\d_]+", text, flags=re.UNICODE)) >= 2
 
 
 @app.on_event("startup")
@@ -107,20 +116,21 @@ def _whisper_prompt(present_names: list[str]) -> str:
     games = ", ".join(g.title for g in GAMES)
     people = ", ".join(n for n in store.list_profile_names(store.connect()) if n)
     return (
-        f"Hey Arc. Tschüss. Erstell mir bitte ein Profil. Can you speak Farsi? "
+        f"Hey Arc. Tschüss. Erstell mir bitte ein Profil. "
         f"Arcade games: {games}. People: {people}. {' '.join(present_names)}."
     )
 
 
 def _language_for(present: list[str]) -> str:
-    """A known person's saved language; GERMAN is the cabinet's default."""
+    """A known person's saved language; GERMAN is the cabinet's default. Persian
+    is no longer supported, so an old fa profile falls back to German."""
     conn = store.connect()
     for name in present:
         if name == "unknown":
             continue
         row = store.get_profile(conn, name)
         if row:
-            return row["language"]
+            return "de" if row["language"] == "fa" else row["language"]
     return "de"
 
 
@@ -167,6 +177,7 @@ def start(req: StartRequest) -> Reply:
         "last_activity": time.time(),
         "last_suggested": None,
         "rejected": [],
+        "game_started_at": None,
     }
     _SESSIONS[session_id] = state
 
@@ -240,16 +251,13 @@ def turn(req: TurnRequest) -> Reply:
             language=None,
             initial_prompt=_whisper_prompt(state["present"]),
         )
-    # Trust whisper's pick with modest confidence: it already DECODED the audio
-    # in that language, so replying in the other one is always worse. (0.7 was
-    # too strict — "Can you speak any English?" transcribed as English yet the
-    # session stayed German.)
-    detected = (
-        spoken_lang if spoken_lang in ("en", "de", "fa") and lang_prob >= 0.5 else None
-    )
+    # Trust whisper's pick with decent confidence: it already DECODED the audio
+    # in that language, so replying in the other one is always worse.
+    detected = spoken_lang if spoken_lang in ("en", "de") and lang_prob >= 0.6 else None
 
     actions: list[dict] = []
     woke = False
+    rest = ""
     if state["attention"] == "idle":
         woke, rest = wake.split_wake(user_text)
         if not woke:
@@ -267,7 +275,9 @@ def turn(req: TurnRequest) -> Reply:
             }
         )
         state["last_activity"] = now
-        lang = detected or state["language"]
+        # Just a wake shout from across the room — don't guess a language from
+        # "Hey Arc"; invite them over in the cabinet's current language.
+        lang = state["language"]
         text = agent.phrase("come_over", {}, lang)
         return Reply(
             session_id=req.session_id,
@@ -279,10 +289,13 @@ def turn(req: TurnRequest) -> Reply:
             attention="idle",
         )
 
-    # Arc answers in the language the person actually spoke (German default
-    # stands until someone speaks English or Farsi). Only for turns it responds
-    # to — overheard chatter never flips the language.
-    if detected and detected != state["language"]:
+    # Arc answers in the language the person is actually SPEAKING (German default
+    # stands until someone genuinely speaks English). Judged only on real spoken
+    # content: the wake phrase "Hey Arc" reads as English to whisper, so on its
+    # own — or on a bare one-word reply — it must never flip the language. Only
+    # for turns Arc responds to; overheard chatter never flips it either.
+    content = rest if woke else user_text
+    if detected and detected != state["language"] and _spoken_content(content):
         state["language"] = detected
         actions.append(
             {
@@ -322,9 +335,9 @@ def turn(req: TurnRequest) -> Reply:
     if _is_junk(user_text):
         return _ignored(req.session_id, state, user_text)
 
-    if spoken_lang not in ("en", "de", "fa") and lang_prob >= 0.6:
-        # They spoke a language Arc doesn't have (seen live: Farsi) — the
-        # transcript is unusable gibberish, so say so instead of guessing.
+    if spoken_lang not in ("en", "de") and lang_prob >= 0.6:
+        # They spoke a language Arc doesn't have (e.g. Farsi) — the transcript
+        # is unusable gibberish, so say so instead of guessing.
         actions.append(
             {
                 "tool": "route",
@@ -350,6 +363,7 @@ def turn(req: TurnRequest) -> Reply:
         running_game=state["running_game"],
         last_suggested=state.get("last_suggested"),
         rejected=list(state.get("rejected") or []),
+        game_started_at=state.get("game_started_at"),
     )
     text, turn_actions, kind = agent.handle_turn(
         sess, user_text, state["language"], pending=state["pending"]
@@ -357,9 +371,14 @@ def turn(req: TurnRequest) -> Reply:
     actions.extend(turn_actions)
 
     state["running_game"] = sess.running_game
+    state["game_started_at"] = sess.game_started_at
     state["last_suggested"] = sess.last_suggested
     state["rejected"] = sess.rejected
-    if kind == "ask_name":
+    if sess.pending_request:
+        # Arc just asked its own question ("restart on the left?" / "is that
+        # you?") — the next utterance answers it.
+        state["pending"] = sess.pending_request
+    elif kind in ("ask_name", "ask_other_name"):
         state["pending"] = "name"
     elif kind == "played_need_side":
         state["pending"] = "joystick"
@@ -387,11 +406,14 @@ def turn(req: TurnRequest) -> Reply:
         # Mid-game, Arc handles the woken request and then goes right back to
         # ignoring gameplay chatter — the next request needs "Hey Arc" again.
         # It stays engaged only while a question is open (pending, unclear) or
-        # while they're actively browsing for a different game.
+        # while they're actively browsing for a different game. SAY so — going
+        # silent without warning felt like a bug.
         state["attention"] = "idle"
+        text = f"{text} {agent.idle_hint(state['language'])}"
+    recognized = sess.recognized_as
     if kind == "profile_created":
         # The camera "learns" the new face: the guest is now a known person.
-        created = next(
+        recognized = next(
             (
                 a["args"].get("name")
                 for a in turn_actions
@@ -399,10 +421,12 @@ def turn(req: TurnRequest) -> Reply:
             ),
             None,
         )
-        if created:
-            state["present"] = [
-                created if n == "unknown" else n for n in state["present"]
-            ]
+    if recognized:
+        # Newly created, or merged into an existing profile ("is that you?" —
+        # "yes"): either way the guest is now this known person.
+        state["present"] = [
+            recognized if n == "unknown" else n for n in state["present"]
+        ]
 
     done = kind == "goodbye"
     return Reply(
