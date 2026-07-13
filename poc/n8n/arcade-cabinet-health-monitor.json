@@ -1,0 +1,186 @@
+{
+  "id": "arcadeHealth0001",
+  "name": "Arcade Cabinet Health Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "b1a1e0c2-1111-4a11-8a01-000000000001",
+      "name": "Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8080/health",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "b1a1e0c2-2222-4a22-8a02-000000000002",
+      "name": "Poll Cabinet /health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        400
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1a1e0c2-cond-0001",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1a1e0c2-3333-4a33-8a03-000000000003",
+      "name": "Cabinet OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        780,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1-healthy-001",
+              "name": "status",
+              "value": "\u2705 Cabinet healthy",
+              "type": "string"
+            },
+            {
+              "id": "a1-healthy-002",
+              "name": "checkedAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a1e0c2-4444-4a44-8a04-000000000004",
+      "name": "Cabinet Healthy",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1040,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1-down-001",
+              "name": "status",
+              "value": "\ud83d\udea8 Cabinet unreachable \u2014 check the Pi",
+              "type": "string"
+            },
+            {
+              "id": "a1-down-002",
+              "name": "checkedAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a1e0c2-5555-4a55-8a05-000000000005",
+      "name": "Alert: Cabinet Down",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1040,
+        520
+      ]
+    }
+  ],
+  "connections": {
+    "Every 5 min": {
+      "main": [
+        [
+          {
+            "node": "Poll Cabinet /health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Cabinet /health": {
+      "main": [
+        [
+          {
+            "node": "Cabinet OK?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: Cabinet Down",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cabinet OK?": {
+      "main": [
+        [
+          {
+            "node": "Cabinet Healthy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: Cabinet Down",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

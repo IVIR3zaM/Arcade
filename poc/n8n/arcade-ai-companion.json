@@ -1,0 +1,181 @@
+{
+  "id": "arcadeCompanion1",
+  "name": "Arcade AI Companion (pipeline)",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "authentication": "none",
+        "initialMessages": "Hey! I'm Arc. Ask me what you can play, for a recommendation, the time, or to remember something.",
+        "options": {
+          "responseMode": "lastNode",
+          "title": "Arcade Companion — Arc",
+          "subtitle": "Kian is at the cabinet"
+        }
+      },
+      "id": "chat-trigger-0001",
+      "name": "Player speaks (voice → chat)",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        180,
+        420
+      ],
+      "webhookId": "e2a374fb-7a76-41b3-88cf-634dac49dc51"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// The Pi AI HAT stands in here: the \"camera\" sees who is at the cabinet.\n// Change `present` to test other scenarios: ['Kian'] ['Nika'] ['Reza'] ['unknown'] []\nconst chat = $input.first().json;\nconst userText = (chat.chatInput || chat.message || chat.text || '').toString();\nconst sessionId = (chat.sessionId || chat.sessionID || 'default').toString();\nconst present = ['Kian'];        // who the camera recognises\nconst language = 'en';           // cabinet language: 'en' or 'de' (German default on the real Pi)\nconst runningGame = null;        // no game on the screen in this demo\n\n// The real arcade catalogue (brain/scenarios.py)\nconst GAMES = [\n  {title:'Track & Field', console:'Atari', genre:'sports',     max:1, quick:false},\n  {title:'River Raid',    console:'Atari', genre:'shooter',    max:1, quick:false},\n  {title:'Pong',          console:'Atari', genre:'sports',     max:2, quick:true },\n  {title:'Tetris',        console:'NES',   genre:'puzzle',     max:1, quick:true },\n  {title:'Contra',        console:'NES',   genre:'shooter',    max:2, quick:false},\n  {title:'Super Mario World', console:'SNES', genre:'platformer', max:1, quick:false},\n  {title:'Street Fighter II', console:'SNES', genre:'fighting',   max:2, quick:false},\n  {title:'Mario Kart 64', console:'N64',   genre:'racing',     max:2, quick:true },\n];\nconst gameList = GAMES.map(g=>g.title).join(', ');\n\n// Possibility map (brain/agent.py): a running game \"owns\" the screen, so some\n// intents aren't even offered to the model while one is on.\nconst INTENT_NAMES = ['play_game','stop_game','list_games','recommend','remember',\n  'create_profile','delete_profile','set_privacy','monitor','switch_language',\n  'get_context','goodbye','other'];\nconst allowed = runningGame\n  ? INTENT_NAMES.filter(n => !['create_profile','delete_profile'].includes(n))\n  : INTENT_NAMES;\n\n// The REAL intent system prompt + bilingual few-shots (brain/agent.py). Constant,\n// so llama.cpp caches its prefill between turns on the Pi.\nconst EXAMPLES = `\"let's play pong\" -> {\"intent\":\"play_game\",\"title\":\"Pong\"}\n\"lass uns tetris spielen\" -> {\"intent\":\"play_game\",\"title\":\"Tetris\"}\n\"put on track and field\" -> {\"intent\":\"play_game\",\"title\":\"Track & Field\"}\n\"stop the game\" -> {\"intent\":\"stop_game\"}\n\"ich bin fertig\" -> {\"intent\":\"stop_game\"}\n\"what can I play?\" -> {\"intent\":\"list_games\"}\n\"was soll ich spielen?\" -> {\"intent\":\"recommend\"}\n\"I want something in sport\" -> {\"intent\":\"recommend\",\"genre\":\"sports\"}\n\"ich moechte ein rennspiel\" -> {\"intent\":\"recommend\",\"genre\":\"racing\"}\n\"I wanna play something from mario\" -> {\"intent\":\"recommend\",\"query\":\"Mario\"}\n\"not that one, something else\" -> {\"intent\":\"recommend\"}\n\"remember I only play after 5pm\" -> {\"intent\":\"remember\",\"note\":\"only plays after 5pm\"}\n\"save my profile, I'm Sam\" -> {\"intent\":\"create_profile\",\"name\":\"Sam\"}\n\"create a profile for me\" -> {\"intent\":\"create_profile\"}\n\"delete my profile\" -> {\"intent\":\"delete_profile\"}\n\"turn off the mic and camera every night from 8pm to 9am\" -> {\"intent\":\"set_privacy\",\"start\":\"20:00\",\"end\":\"09:00\"}\n\"turn off the screen\" -> {\"intent\":\"monitor\",\"on\":false}\n\"speak English please\" -> {\"intent\":\"switch_language\",\"language\":\"en\"}\n\"sprich Deutsch\" -> {\"intent\":\"switch_language\",\"language\":\"de\"}\n\"what time is it?\" -> {\"intent\":\"get_context\"}\n\"what is the cpu temperature?\" -> {\"intent\":\"get_context\"}\n\"how long have I been playing?\" -> {\"intent\":\"get_context\"}\n\"bye\" -> {\"intent\":\"goodbye\"}\n\"tschuess\" -> {\"intent\":\"goodbye\"}`;\n\nconst SYSTEM = `You label what a person at an arcade wants, as JSON only (no prose). `\n  + `The person may speak English or German. Known games: ${gameList}.\\n`\n  + `Return JSON with intent plus only the fields that apply (title, genre, query, `\n  + `note, name, start, end, on, language). Convert times to 24h HH:MM. Only include `\n  + `name if the person actually said a name. If truly unrelated, use {\"intent\":\"other\"}.\\n`\n  + `Examples:\\n${EXAMPLES}`;\n\n// Ollama structured-output schema: decoding is constrained to this, so the model\n// physically cannot invent an intent or answer in prose.\nconst SCHEMA = {\n  type:'object',\n  properties:{\n    intent:{type:'string', enum: INTENT_NAMES},\n    title:{type:'string'}, genre:{type:'string'}, query:{type:'string'},\n    note:{type:'string'}, name:{type:'string'},\n    start:{type:'string'}, end:{type:'string'}, on:{type:'boolean'},\n    language:{type:'string', enum:['en','de']},\n  },\n  required:['intent'],\n};\n\nconst intentBody = {\n  model: 'qwen2.5:7b-instruct', stream:false, keep_alive:-1,\n  options:{ temperature:0.1, num_predict:48 },\n  format: SCHEMA,\n  messages:[\n    {role:'system', content: SYSTEM},\n    {role:'user',   content: `Doable right now: ${allowed.join(', ')}.\\nThe person said: \"${userText}\"`},\n  ],\n};\n\nreturn [{ json: { userText, sessionId, present, language, runningGame, games: GAMES, allowed, intentBody } }];\n"
+      },
+      "id": "ctx-node-000000001",
+      "name": "AI HAT Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.intentBody }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "classify-000000001",
+      "name": "1 · Classify Intent (LLM · structured JSON)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// STEP 2 — CODE runs the action deterministically and OWNS access control.\n// The model only labelled the request; who-may-do-what is decided here.\nconst ctx = $('AI HAT Context').first().json;\nconst raw = $input.first().json;\n\nlet slots;\ntry { slots = JSON.parse(raw.message.content); }\ncatch (e) { slots = { intent: 'other' }; }\n// A small model occasionally reaches past the menu it was given -> coerce.\nif (!ctx.allowed.includes(slots.intent)) slots.intent = 'other';\n\nconst GAMES = ctx.games;\nconst present = ctx.present;\nlet language = ctx.language;\n\n// Demo memory (brain/scenarios.py): remaining screen-time + minutes played today.\nconst BUDGET = { kian: 45, nika: 10 };\nconst PLAYED = { kian: 110, nika: 45 };\n// Never let a 3B hand over a pronoun as a person's name (brain/agent.py guard).\nconst PRONOUNS = ['me','myself','i','you','guest','unknown','unspecified','someone','somebody','user'];\n\n// ---- SESSION MEMORY (mirrors the Session in brain/app.py) ----------------\n// Persists across turns for the SAME chat session. NOTE: n8n only saves static\n// data for ACTIVE (production/hosted-chat) executions, not the editor's test\n// chat — so run this from the hosted chat URL for multi-turn memory.\nconst store = $getWorkflowStaticData('global');\nstore.sessions = store.sessions || {};\nconst sid = ctx.sessionId || 'default';\nconst sess = store.sessions[sid] || { last_suggested: null, running_game: null, rejected: [] };\nconst who = (present[0] || '').toLowerCase();\n\n// Acceptance / rejection of a pending offer is decided in CODE, not by the model\n// (brain/agent.py _ACCEPTANCES). \"sure\" after \"How about Pong?\" must LAUNCH it.\nconst norm = (ctx.userText || '').toLowerCase().replace(/[^a-zà-ÿ ]/g,'').trim();\nconst ACCEPT = ['yes','yeah','yep','yup','sure','ok','okay','okey','alright','all right','fine',\n  'why not','go for it','lets go','let s go','lets do it','let s do it','do it','sounds good',\n  'that one','thats the one','sure thing','ja','klar','mach das','los','los gehts'];\nconst REJECT = ['no','nope','nah','not that','not that one','something else','anything else',\n  'next','another','nein','nee','was anderes','etwas anderes'];\nconst hit = (list) => list.includes(norm) || list.some(w => w.length > 3 && norm.includes(w));\n\nlet name = slots.intent;\nif (sess.last_suggested && !sess.running_game &&\n    ['other','goodbye','play_game','recommend'].includes(name)) {\n  if (hit(ACCEPT))      { slots = { intent:'play_game', title: sess.last_suggested, _accepted:true }; name='play_game'; }\n  else if (hit(REJECT)) { slots = { intent:'recommend', _rejected:true };                             name='recommend'; }\n}\n\nlet phraseKind = name;\nlet facts = {};\nconst actions = [];\n\nfunction pickGame(genre, query) {\n  let pool = GAMES.slice();\n  if (genre) pool = pool.filter(g => g.genre === genre);\n  if (query) { const q=query.toLowerCase(); const h=GAMES.filter(g=>g.title.toLowerCase().includes(q)); if (h.length) pool=h; }\n  pool = pool.filter(g => !sess.rejected.includes(g.title));\n  if (!pool.length) pool = GAMES.filter(g => !sess.rejected.includes(g.title));\n  if (!pool.length) pool = GAMES.slice();\n  const budget = BUDGET[who];\n  if (budget != null && budget <= 15) { const quick = pool.filter(g=>g.quick); if (quick.length) pool=quick; }\n  return pool[0];\n}\nfunction launch(title) {\n  const t = (title || '').toLowerCase();\n  const g = t && (GAMES.find(x => x.title.toLowerCase() === t) ||\n                  GAMES.find(x => x.title.toLowerCase().includes(t)));\n  if (g) { sess.running_game=g.title; sess.last_suggested=null; phraseKind='play_game';\n           facts={ launched:g.title, players:g.max, confirmed: !!slots._accepted };\n           actions.push({ tool:'launch_game', args:{ title:g.title } }); }\n  else   { phraseKind='not_found'; facts={ asked: title || '' }; }\n}\n\nswitch (name) {\n  case 'list_games':\n    facts = { games: GAMES.map(g => g.title) };\n    break;\n  case 'recommend': {\n    // Naming a specific game IS the choice — launch it, don't re-offer it.\n    if (slots.query) { const g = GAMES.find(x => x.title.toLowerCase() === slots.query.toLowerCase());\n                       if (g) { launch(g.title); break; } }\n    if (slots._rejected && sess.last_suggested && !sess.rejected.includes(sess.last_suggested))\n      sess.rejected.push(sess.last_suggested);\n    const pick = pickGame(slots.genre, slots.query);\n    sess.last_suggested = pick.title;\n    facts = { suggestion: pick.title, genre: pick.genre, players: pick.max,\n              lowTime: BUDGET[who] != null && BUDGET[who] <= 15, budget: BUDGET[who], again: !!slots._rejected };\n    actions.push({ tool: 'suggest_game', args: { title: pick.title } });\n    break;\n  }\n  case 'play_game':\n    launch(slots.title || '');\n    break;\n  case 'stop_game': {\n    const closed = sess.running_game; sess.running_game = null;\n    facts = { stopped: closed || '' };\n    actions.push({ tool:'close_game', args:{} });\n    break;\n  }\n  case 'get_context': {\n    const now = new Date();\n    facts = { time: now.toTimeString().slice(0,5), cpu_temp_c: 54.5, present,\n              played_min: PLAYED[who] || 0, budget_left_min: BUDGET[who], now_playing: sess.running_game };\n    break;\n  }\n  case 'remember':\n    facts = { note: slots.note || '' };\n    actions.push({ tool:'remember', args:{ note: slots.note || '' } });\n    break;\n  case 'create_profile': {\n    const nm = (slots.name || '').trim();\n    if (!nm || PRONOUNS.includes(nm.toLowerCase())) { phraseKind='ask_name'; facts={}; }\n    else { phraseKind='create_profile'; facts={ name:nm };\n           actions.push({ tool:'create_profile', args:{ name:nm } }); }\n    break;\n  }\n  case 'delete_profile': facts = { name: present[0] || '' }; break;\n  case 'set_privacy':\n    facts = { start: slots.start || '', end: slots.end || '' };\n    actions.push({ tool:'set_privacy', args:{ start:slots.start, end:slots.end } });\n    break;\n  case 'monitor':\n    facts = { on: !!slots.on };\n    actions.push({ tool:'set_monitor', args:{ on: !!slots.on } });\n    break;\n  case 'switch_language':\n    language = slots.language || language; phraseKind='switch_language'; facts={ language };\n    break;\n  case 'goodbye':   facts = {}; break;\n  default:          phraseKind = 'other'; facts = {};\n}\n\n// Persist the session (saved on ACTIVE/hosted executions).\nstore.sessions[sid] = sess;\n\n// STEP 3 request — phrase the outcome as Arc would say it (EN/DE, <=2 sentences).\nconst PH_SYS = `You are Arc, a warm, playful companion living in a retro arcade cabinet. `\n  + `Speak in ${language === 'de' ? 'German' : 'English'}. Reply in at most two short spoken `\n  + `sentences, no markdown, no lists. Base your reply ONLY on the facts given — never invent `\n  + `games, names, times or numbers. You MUST state every concrete value present in facts `\n  + `(the time, minutes played, minutes left, temperature, or game title). `\n  + `If the outcome is \"ask_name\", warmly ask what their name is.`;\nconst phraseBody = {\n  model: 'qwen2.5:7b-instruct', stream:false, keep_alive:-1,\n  options:{ temperature:0.3, num_predict:80 },\n  messages:[\n    {role:'system', content: PH_SYS},\n    {role:'user',   content: JSON.stringify({ outcome: phraseKind, who_is_present: present, facts })},\n  ],\n};\n\nreturn [{ json: { intent: name, understood: slots, phraseKind, facts, actions,\n                  language, present, sessionId: sid, memory: sess,\n                  userText: ctx.userText, phraseBody } }];\n"
+      },
+      "id": "execute-0000000001",
+      "name": "2 · Execute Intent (code owns access control)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.phraseBody }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "phrase-00000000001",
+      "name": "3 · Phrase (LLM · EN/DE · ≤2 sentences)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst ex = $('2 · Execute Intent (code owns access control)').first().json;\nconst raw = $input.first().json;\nconst line = (raw && raw.message && raw.message.content ? raw.message.content : '').trim();\nreturn [{ json: {\n  output: line,                 // what the chat shows (and what Piper TTS would speak on the Pi)\n  intent: ex.intent,            // what step 1 understood\n  tools_called: ex.actions,     // what step 2 deterministically did\n  who_is_present: ex.present,\n  understood: ex.understood,\n} }];\n"
+      },
+      "id": "reply-000000000001",
+      "name": "Arc Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "width": 1520,
+        "height": 240,
+        "content": "## Arcade AI Companion — the manager pipeline, in n8n\nA 3B model can't drive a dozen tools from one giant prompt, so each turn is a short pipeline of small, focused steps (mirrors `brain/agent.py` from the Arcade PoC).\n\n**Player speaks** — voice is replaced by chat here (n8n has no mic; on the Pi it's whisper.cpp STT). **AI HAT Context** stands in for the camera (who's at the cabinet) and builds the LLM request. **1·Classify Intent** — one LLM call, Ollama structured output, so the intent is always one of ours. **2·Execute Intent** — CODE runs the action and owns ALL access control (e.g. \"create a profile for **me**\" never makes a profile named \"me\"). **3·Phrase** — a second small LLM call turns the outcome into Arc's line (EN/DE). Try: *what can I play?* · *recommend a racing game* · *let's play Pong* · *what time is it?* · *create a profile for me*"
+      },
+      "id": "sticky-0000000001",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        160,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Player speaks (voice → chat)": {
+      "main": [
+        [
+          {
+            "node": "AI HAT Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI HAT Context": {
+      "main": [
+        [
+          {
+            "node": "1 · Classify Intent (LLM · structured JSON)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1 · Classify Intent (LLM · structured JSON)": {
+      "main": [
+        [
+          {
+            "node": "2 · Execute Intent (code owns access control)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2 · Execute Intent (code owns access control)": {
+      "main": [
+        [
+          {
+            "node": "3 · Phrase (LLM · EN/DE · ≤2 sentences)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3 · Phrase (LLM · EN/DE · ≤2 sentences)": {
+      "main": [
+        [
+          {
+            "node": "Arc Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
